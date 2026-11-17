@@ -8,7 +8,7 @@ import { parseAmount, formatAmount, toKobo, formatNaira } from '../src/money.js'
 let app, base, config;
 
 before(async () => {
-  config = loadConfig({ mode: 'sandbox', dbPath: ':memory:', adminEmails: ['admin@example.com'], authAttemptsPer15Min: 1000 });
+  config = loadConfig({ mode: 'sandbox', dbPath: ':memory:', adminEmails: ['admin@example.com'], authAttemptsPer15Min: 1000, quiet: true });
   app = createApp(config);
   await new Promise((r) => app.server.listen(0, r));
   base = `http://localhost:${app.server.address().port}`;
@@ -28,6 +28,8 @@ async function api(path, { method = 'GET', body, token, headers = {} } = {}) {
 async function newUser(email, password = 'a-long-password') {
   const r = await api('/api/auth/signup', { method: 'POST', body: { email, password } });
   assert.equal(r.status, 201);
+  // These tests are about trading, so skip the email step. test/security.test.js covers it.
+  app.db.prepare('UPDATE users SET email_verified = 1 WHERE email = ?').run(email);
   return r.json.token;
 }
 
@@ -163,5 +165,9 @@ test('rates and assets are public; bad JSON is a clean 400', async () => {
 });
 
 test('live mode refuses to start on fake providers', () => {
-  assert.throws(() => loadConfig({ mode: 'live', tokenSecret: 'x'.repeat(32), webhookSecret: 'y'.repeat(32), corsOrigin: 'https://example.com' }) && createApp(loadConfig({ mode: 'live', tokenSecret: 'x'.repeat(32), webhookSecret: 'y'.repeat(32), corsOrigin: 'https://example.com' }), { db: app.db }), /No live providers/);
+  const live = loadConfig({
+    mode: 'live', tokenSecret: 'x'.repeat(32), webhookSecret: 'y'.repeat(32), dataKey: 'z'.repeat(32),
+    publicUrl: 'https://kobodesk.example', mailProvider: 'resend', mailApiKey: 'k', mailFrom: 'no-reply@kobodesk.example',
+  });
+  assert.throws(() => createApp(live, { db: app.db }), /No live providers/);
 });
