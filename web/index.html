@@ -6,26 +6,33 @@
 <title>Kobodesk | Sell crypto, get naira in your bank</title>
 <meta name="description" content="Sell USDT, BTC, ETH or SOL and get naira paid to your Nigerian bank account. See your rate before you send.">
 <meta name="theme-color" content="#0B3D2E">
+<meta property="og:title" content="Kobodesk | Sell crypto, get naira in your bank">
+<meta property="og:description" content="Sell USDT, BTC, ETH or SOL and get naira paid to your Nigerian bank account. See your rate before you send.">
+<meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 34 34'%3E%3Crect width='34' height='34' rx='9' fill='%230B3D2E'/%3E%3Cpath d='M11 9v16M11 17l9-8M12.5 15.5L21 25' stroke='%23F2B33D' stroke-width='2.6' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&display=swap">
 <link rel="stylesheet" href="/site.css">
 </head>
 <body>
 
-<div id="top" class="band">
+<header class="topbar">
   <div class="wrap nav">
     <a href="#top" class="logo">
       <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="9" fill="#0B3D2E"/><path d="M11 9v16M11 17l9-8M12.5 15.5L21 25" stroke="#F2B33D" stroke-width="2.6" stroke-linecap="round" fill="none"/></svg>
       <span>Kobodesk</span>
     </a>
-    <div class="links">
+    <nav class="links" aria-label="Main">
       <a href="#how" class="hide-sm">How it works</a>
       <a href="#assets" class="hide-sm">Assets</a>
+      <a href="#faq" class="hide-sm">FAQ</a>
       <a href="/app.html#/login">Log in</a>
       <a href="/app.html#/signup" class="btn-sm">Start trading</a>
-    </div>
+    </nav>
   </div>
+</header>
 
+<main id="top">
+<section class="band">
   <div class="wrap hero">
     <div>
       <span class="pill">Crypto to naira</span>
@@ -47,61 +54,85 @@
       </div>
     </div>
   </div>
-</div>
+</section>
 
-<div id="how" class="band band-white">
+<section class="band band-white strip" aria-label="Why customers use Kobodesk">
+  <div class="wrap strip-in">
+    <div class="strip-item"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0B3D2E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10l9-6 9 6"/><path d="M5 10v8M10 10v8M14 10v8M19 10v8"/><path d="M3 20h18"/></svg><span><b>Paid to your bank</b>Naira goes to your Nigerian account</span></div>
+    <div class="strip-item"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0B3D2E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span><b>Rate locked</b>Quoted before you send</span></div>
+    <div class="strip-item"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0B3D2E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg><span><b>Two-factor sign-in</b>Protect your account</span></div>
+    <div class="strip-item"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0B3D2E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg><span><b>Address per trade</b>A fresh deposit address each time</span></div>
+  </div>
+</section>
+
+<section id="how" class="band">
   <div class="wrap sec">
-    <span class="eyebrow">How it works</span>
-    <h2>Three steps from wallet to bank</h2>
-    <div class="grid3">
-      <div class="card"><span class="step">Step 1</span><h3>Set up your account</h3><p>Sign up with your email and add the Nigerian bank account where you want your naira.</p></div>
+    <div class="railhead">
+      <div>
+        <span class="eyebrow">How it works</span>
+        <h2>Three steps from wallet to bank</h2>
+      </div>
+      <div class="railnav" data-rail="rail-steps"><button type="button" class="railbtn" data-dir="-1" aria-label="Previous step">&#8249;</button><button type="button" class="railbtn" data-dir="1" aria-label="Next step">&#8250;</button></div>
+    </div>
+    <div class="rail" id="rail-steps" tabindex="0" role="region" aria-label="Steps. Swipe sideways to see more." style="--cols:3">
+      <div class="card"><span class="step">Step 1</span><h3>Set up your account</h3><p>Sign up with your email, confirm it with a 6-digit code, and add the Nigerian bank account where you want your naira.</p></div>
       <div class="card"><span class="step">Step 2</span><h3>Pick a coin, get an address</h3><p>Choose the coin and network, enter the amount, and check the naira you will receive. Then copy the deposit address.</p></div>
       <div class="card"><span class="step">Step 3</span><h3>Send and get paid</h3><p>Send the crypto from your wallet. When it is confirmed on the network, your naira is paid to your bank in [YOUR PAYOUT TIME].</p></div>
     </div>
+    <p class="swipe-hint">Swipe sideways to see every step</p>
   </div>
-</div>
+</section>
 
-<div id="assets" class="band">
-  <div class="wrap sec split">
-    <div>
-      <span class="eyebrow">Supported assets</span>
-      <h2>Trade the coins you already hold</h2>
-      <p class="sub">Pick the right network when you send. A deposit sent on the wrong network can be lost, so the address page names the network in plain view.</p>
+<section id="assets" class="band band-white">
+  <div class="wrap sec">
+    <div class="railhead">
+      <div>
+        <span class="eyebrow">Supported assets</span>
+        <h2>Trade the coins you already hold</h2>
+        <p class="sub">Pick the right network when you send. A deposit sent on the wrong network can be lost, so the address page names the network in plain view.</p>
+      </div>
+      <div class="railnav" data-rail="rail-assets"><button type="button" class="railbtn" data-dir="-1" aria-label="Previous coin">&#8249;</button><button type="button" class="railbtn" data-dir="1" aria-label="Next coin">&#8250;</button></div>
     </div>
-    <div class="tiles">
+    <div class="rail rail-sm" id="rail-assets" tabindex="0" role="region" aria-label="Supported coins. Swipe sideways to see more." style="--cols:4">
       <div class="tile"><b>USDT</b><span>Tether</span><em>TRC-20, ERC-20</em></div>
       <div class="tile"><b>BTC</b><span>Bitcoin</span><em>Bitcoin network</em></div>
       <div class="tile"><b>ETH</b><span>Ethereum</span><em>Ethereum network</em></div>
       <div class="tile"><b>SOL</b><span>Solana</span><em>Solana network</em></div>
     </div>
   </div>
-</div>
+</section>
 
-<div class="band band-green">
+<section class="band band-green">
   <div class="wrap sec">
-    <h2>Built so you are never guessing</h2>
-    <div class="feats">
+    <div class="railhead">
       <div>
+        <span class="eyebrow eyebrow-light">Built for trust</span>
+        <h2>Built so you are never guessing</h2>
+      </div>
+      <div class="railnav" data-rail="rail-feats"><button type="button" class="railbtn" data-dir="-1" aria-label="Previous feature">&#8249;</button><button type="button" class="railbtn" data-dir="1" aria-label="Next feature">&#8250;</button></div>
+    </div>
+    <div class="rail" id="rail-feats" tabindex="0" role="region" aria-label="Features. Swipe sideways to see more." style="--cols:4">
+      <div class="fcard">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#F2B33D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
         <h3>See the rate first</h3><p>The naira amount is shown before you confirm, so you know what lands in your bank.</p>
       </div>
-      <div>
+      <div class="fcard">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#F2B33D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10l9-6 9 6"/><path d="M5 10v8M10 10v8M14 10v8M19 10v8"/><path d="M3 20h18"/></svg>
         <h3>Paid to your bank</h3><p>Add the Nigerian bank account you use and get your payout there. No wallet to top up.</p>
       </div>
-      <div>
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#F2B33D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>
-        <h3>A fresh address per trade</h3><p>Each trade gets its own deposit address, tied to the coin and network you chose.</p>
+      <div class="fcard">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#F2B33D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+        <h3>Account protection</h3><p>Confirm your email with a code, and turn on two-factor sign-in with an authenticator app.</p>
       </div>
-      <div>
+      <div class="fcard">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#F2B33D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 01-11.5 7.2L4 20l1-4.5A8 8 0 1121 12z"/></svg>
         <h3>A person to talk to</h3><p>Stuck on a transfer? Reach support at [YOUR SUPPORT HOURS] on [YOUR SUPPORT CHANNEL].</p>
       </div>
     </div>
   </div>
-</div>
+</section>
 
-<div id="faq" class="band">
+<section id="faq" class="band">
   <div class="wrap sec split faqs">
     <div>
       <span class="eyebrow">FAQ</span>
@@ -118,29 +149,30 @@
       <p class="a" hidden>No. The calculator shows an estimate. When you start a trade, we lock the rate for a short time and show you the exact naira amount before you send.</p>
     </div>
   </div>
-</div>
+</section>
 
-<div class="band">
+<section class="band">
   <div class="wrap">
     <div class="cta">
       <h2>Check today's rate, then decide.</h2>
       <a href="/app.html#/signup" class="btn btn-primary">Create free account</a>
     </div>
   </div>
-</div>
+</section>
+</main>
 
-<div class="band band-deep">
+<footer class="band band-deep">
   <div class="wrap foot">
     <div class="foot-top">
       <strong>Kobodesk</strong>
-      <div>
-        <a href="#how">How it works</a><a href="#assets">Assets</a><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a>
-      </div>
+      <nav aria-label="Footer">
+        <a href="#how">How it works</a><a href="#assets">Assets</a><a href="/app.html#/login">Log in</a><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a>
+      </nav>
     </div>
     <p>Crypto prices move quickly. Rates on this page are estimates and can change before you start a trade.</p>
     <p>[YOUR COMPANY NAME, RC NUMBER AND SEC REGISTRATION DETAILS]</p>
   </div>
-</div>
+</footer>
 
 <script src="/site.js"></script>
 </body>

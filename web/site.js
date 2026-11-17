@@ -104,3 +104,25 @@
     });
   }
 })();
+
+// Sideways sections: the arrow buttons scroll one card at a time.
+(function () {
+  'use strict';
+  var navs = document.querySelectorAll('.railnav');
+  for (var i = 0; i < navs.length; i++) {
+    (function (nav) {
+      var rail = document.getElementById(nav.getAttribute('data-rail'));
+      if (!rail) return;
+      var btns = nav.querySelectorAll('.railbtn');
+      for (var j = 0; j < btns.length; j++) {
+        btns[j].addEventListener('click', function () {
+          var dir = Number(this.getAttribute('data-dir'));
+          var card = rail.firstElementChild;
+          var step = card ? card.getBoundingClientRect().width + 16 : rail.clientWidth * 0.8;
+          try { rail.scrollBy({ left: dir * step, behavior: 'smooth' }); }
+          catch (e) { rail.scrollLeft += dir * step; }
+        });
+      }
+    })(navs[i]);
+  }
+})();

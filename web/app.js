@@ -544,7 +544,7 @@
     });
     kids.push(h('div', { class: 'panel' }, h('h2', null, 'Devices'), h('p', null, 'Lost a phone or used a shared computer? Log out everywhere.'), oBtn));
 
-    holder.appendChild(h('div', { class: 'wrap narrow' }, kids));
+    holder.appendChild(h('div', { class: 'wrap narrow' }, h('h1', null, 'Settings'), kids));
   }
 
   function twoFactorPanel(u) {
