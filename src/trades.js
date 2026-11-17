@@ -45,7 +45,8 @@ export function expireStaleTrades(db) {
     .run(Date.now(), Date.now()).changes;
 }
 
-export async function createTrade({ db, config, providers, user, input }) {
+// Validates coin, network and amount, then prices the trade. Used by both /api/quote and createTrade.
+export async function priceTrade(config, input) {
   const coin = String(input.coin ?? '').toUpperCase();
   const network = String(input.network ?? '').toUpperCase();
   const asset = ASSETS[coin];
@@ -56,18 +57,25 @@ export async function createTrade({ db, config, providers, user, input }) {
   const scaled = parseAmount(input.amount);
   if (scaled == null) throw new HttpError(400, 'Enter an amount with up to 8 decimal places.', 'bad_amount');
 
+  const rate = (await getSellRates(config))[coin];
+  const quote = toKobo(scaled, rate) - config.flatFeeKobo;
+  if (quote < config.minTradeKobo) {
+    throw new HttpError(400, `The minimum trade is ₦${formatNaira(config.minTradeKobo)}.`, 'below_minimum');
+  }
+  return { coin, network, scaled, rate, quote };
+}
+
+export async function createTrade({ db, config, providers, user, input }) {
+  if (!user.email_verified) {
+    throw new HttpError(403, 'Verify your email address before you trade. Check your inbox for the link.', 'verify_email');
+  }
+  const { coin, network, scaled, rate, quote } = await priceTrade(config, input);
+
   const account = db
     .prepare('SELECT * FROM bank_accounts WHERE id = ? AND user_id = ?')
     .get(String(input.bank_account_id ?? ''), user.id);
   if (!account) throw new HttpError(400, 'Choose one of your saved bank accounts.', 'bad_bank_account');
 
-  const rates = await getSellRates(config);
-  const rate = rates[coin];
-  const gross = toKobo(scaled, rate);
-  const quote = gross - config.flatFeeKobo;
-  if (quote < config.minTradeKobo) {
-    throw new HttpError(400, `The minimum trade is ₦${formatNaira(config.minTradeKobo)}.`, 'below_minimum');
-  }
   const cap = user.kyc_status === 'verified' ? config.maxTradeKoboVerified : config.maxTradeKoboUnverified;
   if (quote > cap) {
     throw new HttpError(

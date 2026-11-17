@@ -54,6 +54,14 @@ CREATE TABLE IF NOT EXISTS deposits (
   updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS email_tokens (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  purpose TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   trade_id TEXT,
@@ -63,11 +71,27 @@ CREATE TABLE IF NOT EXISTS events (
 );
 `;
 
+// Columns added after the first version. Older databases get them on start-up.
+const USER_COLUMNS = [
+  ['email_verified', 'INTEGER NOT NULL DEFAULT 0'],
+  ['token_version', 'INTEGER NOT NULL DEFAULT 0'],
+  ['totp_secret', 'TEXT'],
+  ['totp_enabled', 'INTEGER NOT NULL DEFAULT 0'],
+  ['totp_last_step', 'INTEGER NOT NULL DEFAULT 0'],
+  ['verify_code_hash', 'TEXT'],
+  ['verify_code_expires', 'INTEGER NOT NULL DEFAULT 0'],
+  ['verify_code_attempts', 'INTEGER NOT NULL DEFAULT 0'],
+];
+
 export function openDb(dbPath) {
   if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
+  const have = new Set(db.prepare('PRAGMA table_info(users)').all().map((c) => c.name));
+  for (const [name, def] of USER_COLUMNS) {
+    if (!have.has(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${def}`);
+  }
   return db;
 }
 
