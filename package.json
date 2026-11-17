@@ -1,0 +1,13 @@
+{
+  "name": "kobodesk-backend",
+  "version": "0.1.0",
+  "description": "Backend API for Kobodesk, a crypto-to-naira trading service. Zero dependencies; runs on Node 22.5+.",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --no-warnings src/index.js",
+    "dev": "node --no-warnings --watch src/index.js",
+    "test": "node --no-warnings --test \"test/*.test.js\""
+  }
+}
