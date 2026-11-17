@@ -1,6 +1,8 @@
-# Kobodesk backend
+# Kobodesk
 
-API for a crypto-to-naira trading service. It handles accounts, saved bank accounts, rate quotes, trades, deposit confirmation and bank payouts.
+A crypto-to-naira trading service: website, customer app and API in one server. **To put it online, read `DEPLOY.md`.**
+
+It handles accounts, email confirmation codes, two-factor sign-in, saved bank accounts, rate quotes, trades, deposit confirmation and bank payouts. Pages are in `web/`, the API is in `src/`.
 
 It has **no dependencies**. It needs Node 22.5 or newer (it uses the built-in SQLite module).
 
@@ -11,7 +13,7 @@ It has **no dependencies**. It needs Node 22.5 or newer (it uses the built-in SQ
 ```
 cp .env.example .env      # optional; sandbox mode works without it
 npm start                 # http://localhost:3000
-npm test                  # 9 tests covering the full trade flow
+npm test                  # 21 tests: trade flow, accounts, email codes, 2FA, mail sending
 ```
 
 Node does not read `.env` files by itself. Either export the variables in your shell, or start with `node --env-file=.env --no-warnings src/index.js`.
@@ -35,7 +37,13 @@ Trade statuses: `awaiting_deposit`, `confirming`, `paying_out`, `paid_out`, `exp
 | GET | `/api/rates` | Sell rate per coin, in kobo and naira |
 | GET | `/api/banks` | Bank list from the payout provider |
 | POST | `/api/auth/signup` | `{ email, password }` (10+ characters) |
-| POST | `/api/auth/login` | `{ email, password }` |
+| POST | `/api/auth/login` | `{ email, password, code? }` (`code` only if 2FA is on) |
+| POST | `/api/auth/verify-code` | `{ code }`. The 6-digit code from the sign-up email |
+| POST | `/api/auth/resend-verification` | Sends a new code |
+| POST | `/api/auth/forgot-password`, `/api/auth/reset-password` | Email reset link |
+| POST | `/api/auth/change-password`, `/api/auth/logout-all` | |
+| POST | `/api/2fa/setup`, `/api/2fa/enable`, `/api/2fa/disable` | Authenticator app sign-in |
+| GET | `/api/quote?coin=&network=&amount=` | Public price check |
 | GET | `/api/me` | Needs `Authorization: Bearer <token>` |
 | GET, POST | `/api/bank-accounts` | POST `{ bank_code, account_number }` |
 | POST | `/api/trades` | `{ coin, network, amount, bank_account_id }` |
@@ -92,5 +100,6 @@ Setting `MODE` to anything other than `sandbox` makes the server refuse to start
 ## Known limits
 
 - The sign-in rate limiter is in memory and keys on the connection address. Behind a proxy, every user shares one address, so add trusted `X-Forwarded-For` handling first.
-- There is no email verification, password reset, or two-factor sign-in yet. Add these before launch.
-- Sessions are 7-day tokens and cannot be revoked individually.
+- Customers must confirm their email with a 6-digit code before they can trade. Email is sent through Gmail SMTP or Resend; neither has been run against the live service from the build environment, so send yourself a test first.
+- Identity checks (KYC) are not built. Every customer stays "unverified" and gets the lower limit until an admin sets their status.
+- Sessions are 7-day tokens. A customer can log out of every device, but not one at a time.
