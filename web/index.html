@@ -9,9 +9,22 @@
 <meta property="og:title" content="Kobodesk | Sell crypto, get naira in your bank">
 <meta property="og:description" content="Sell USDT, BTC, ETH or SOL and get naira paid to your Nigerian bank account. See your rate before you send.">
 <meta property="og:type" content="website">
+<meta property="og:url" content="%PUBLIC_URL%/">
+<meta property="og:image" content="%PUBLIC_URL%/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Kobodesk | Sell crypto, get naira in your bank">
+<meta name="twitter:image" content="%PUBLIC_URL%/og.png">
+<link rel="canonical" href="%PUBLIC_URL%/">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kobodesk">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 34 34'%3E%3Crect width='34' height='34' rx='9' fill='%230B3D2E'/%3E%3Cpath d='M11 9v16M11 17l9-8M12.5 15.5L21 25' stroke='%23F2B33D' stroke-width='2.6' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&display=swap">
 <link rel="stylesheet" href="/site.css">
+<!--ANALYTICS-->
 </head>
 <body>
 
@@ -77,7 +90,7 @@
     <div class="rail" id="rail-steps" tabindex="0" role="region" aria-label="Steps. Swipe sideways to see more." style="--cols:3">
       <div class="card"><span class="step">Step 1</span><h3>Set up your account</h3><p>Sign up with your email, confirm it with a 6-digit code, and add the Nigerian bank account where you want your naira.</p></div>
       <div class="card"><span class="step">Step 2</span><h3>Pick a coin, get an address</h3><p>Choose the coin and network, enter the amount, and check the naira you will receive. Then copy the deposit address.</p></div>
-      <div class="card"><span class="step">Step 3</span><h3>Send and get paid</h3><p>Send the crypto from your wallet. When it is confirmed on the network, your naira is paid to your bank in [YOUR PAYOUT TIME].</p></div>
+      <div class="card"><span class="step">Step 3</span><h3>Send and get paid</h3><p>Send the crypto from your wallet. When it is confirmed on the network, your naira is paid to your bank in <span data-cfg="payout_time">[YOUR PAYOUT TIME]</span>.</p></div>
     </div>
     <p class="swipe-hint">Swipe sideways to see every step</p>
   </div>
@@ -126,7 +139,7 @@
       </div>
       <div class="fcard">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#F2B33D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 01-11.5 7.2L4 20l1-4.5A8 8 0 1121 12z"/></svg>
-        <h3>A person to talk to</h3><p>Stuck on a transfer? Reach support at [YOUR SUPPORT HOURS] on [YOUR SUPPORT CHANNEL].</p>
+        <h3>A person to talk to</h3><p>Stuck on a transfer? Our team is available <span data-cfg="support_hours">[YOUR SUPPORT HOURS]</span>. Contact details are in the Support section below.</p>
       </div>
     </div>
   </div>
@@ -140,13 +153,39 @@
     </div>
     <div class="faq" id="faqList">
       <button type="button" class="q" aria-expanded="true"><span>How long does a payout take?</span><i aria-hidden="true">&minus;</i></button>
-      <p class="a">Your naira is paid to your bank in [YOUR PAYOUT TIME] after the network confirms your deposit.</p>
+      <p class="a">Your naira is paid to your bank in <span data-cfg="payout_time">[YOUR PAYOUT TIME]</span> after the network confirms your deposit.</p>
       <button type="button" class="q" aria-expanded="false"><span>Which networks can I send on?</span><i aria-hidden="true">+</i></button>
       <p class="a" hidden>USDT on TRC-20 or ERC-20, BTC on Bitcoin, ETH on Ethereum and SOL on Solana. The address page shows the network for your trade.</p>
       <button type="button" class="q" aria-expanded="false"><span>What happens if I send on the wrong network?</span><i aria-hidden="true">+</i></button>
       <p class="a" hidden>The deposit may not arrive. Always match the network shown next to the address, and contact support before sending again.</p>
       <button type="button" class="q" aria-expanded="false"><span>Is the rate on this page final?</span><i aria-hidden="true">+</i></button>
       <p class="a" hidden>No. The calculator shows an estimate. When you start a trade, we lock the rate for a short time and show you the exact naira amount before you send.</p>
+    </div>
+  </div>
+</section>
+
+<section id="support" class="band band-white">
+  <div class="wrap sec">
+    <span class="eyebrow">Support</span>
+    <h2>Talk to a person</h2>
+    <p class="sub">Our team is available <span data-cfg="support_hours">[YOUR SUPPORT HOURS]</span>. Have your trade ID ready. It is shown on every trade page.</p>
+    <div class="contact-grid">
+      <a class="contact" href="#support" data-cfg-mailto><b>Email</b><span data-cfg="support_email">[YOUR SUPPORT EMAIL]</span></a>
+      <a class="contact" href="#support" data-cfg-wa><b>WhatsApp</b><span data-cfg-wa-text>[YOUR WHATSAPP NUMBER]</span></a>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="band">
+  <div class="wrap sec split">
+    <div>
+      <span class="eyebrow">On your phone</span>
+      <h2>Keep Kobodesk on your home screen</h2>
+      <p class="sub">Add it once and it opens like an app, with no download from an app store.</p>
+    </div>
+    <div class="steps-list">
+      <div class="card"><h3>iPhone</h3><p>Open this site in Safari, tap the Share button, then choose Add to Home Screen.</p></div>
+      <div class="card"><h3>Android</h3><p>Open this site in Chrome, tap the menu, then choose Install app or Add to Home screen.</p></div>
     </div>
   </div>
 </section>
@@ -166,14 +205,15 @@
     <div class="foot-top">
       <strong>Kobodesk</strong>
       <nav aria-label="Footer">
-        <a href="#how">How it works</a><a href="#assets">Assets</a><a href="/app.html#/login">Log in</a><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a>
+        <a href="#how">How it works</a><a href="#assets">Assets</a><a href="#support">Support</a><a href="/app.html#/login">Log in</a><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a>
       </nav>
     </div>
     <p>Crypto prices move quickly. Rates on this page are estimates and can change before you start a trade.</p>
-    <p>[YOUR COMPANY NAME, RC NUMBER AND SEC REGISTRATION DETAILS]</p>
+    <p data-cfg="company_line">[YOUR COMPANY NAME, RC NUMBER AND SEC REGISTRATION DETAILS]</p>
   </div>
 </footer>
 
+<script src="/config.js"></script>
 <script src="/site.js"></script>
 </body>
 </html>

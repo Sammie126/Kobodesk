@@ -45,6 +45,10 @@
   function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
 
   function loadToken() { try { S.token = localStorage.getItem('kd_token'); } catch (e) { S.token = null; } }
+  function captureRef() {
+    try { var m = location.search.match(/[?&]ref=([0-9A-Za-z]{10})/); if (m) localStorage.setItem('kd_ref', m[1].toUpperCase()); } catch (e) { /* private mode */ }
+  }
+  function getRef() { try { return localStorage.getItem('kd_ref') || undefined; } catch (e) { return undefined; } }
   function saveToken(t) {
     S.token = t;
     try { if (t) localStorage.setItem('kd_token', t); else localStorage.removeItem('kd_token'); } catch (e) { /* private mode */ }
@@ -191,7 +195,7 @@
         saveToken(null); S.user = null; S.flash = { kind: 'info', text: 'You are logged out.' }; go('#/login');
       } }, 'Log out'))));
     parts.push(h('main', { class: 'wrap app' },
-      h('nav', { class: 'tabs', 'aria-label': 'Main' }, tab('sell', 'Sell', '#/sell'), tab('trades', 'My trades', '#/trades'), tab('settings', 'Settings', '#/settings')),
+      h('nav', { class: 'tabs', 'aria-label': 'Main' }, tab('sell', 'Sell', '#/sell'), tab('trades', 'My trades', '#/trades'), tab('settings', 'Settings', '#/settings'), S.user && S.user.is_admin ? tab('admin', 'Admin', '#/admin') : null),
       flash ? msg(flash.kind, flash.text) : null,
       content));
     return h('div', null, parts);
@@ -230,7 +234,7 @@
       h('div', { class: 'field' }, h('label', { for: agreeId }, agree, ' I agree to the ', h('a', { href: '/terms.html' }, 'Terms'), ' and ', h('a', { href: '/privacy.html' }, 'Privacy Policy'), '.')),
       btn);
     onSubmit(form, btn, err, function () {
-      return api('/api/auth/signup', { method: 'POST', anon: true, body: { email: email.value, password: pw.value } }).then(function (r) {
+      return api('/api/auth/signup', { method: 'POST', anon: true, body: { email: email.value, password: pw.value, ref: getRef() } }).then(function (r) {
         saveToken(r.token); S.user = r.user;
         S.flash = { kind: 'info', text: 'Welcome. We sent a 6-digit code to ' + r.user.email + '.' };
         go('#/confirm');
@@ -436,7 +440,10 @@
     var kids = [];
     var waiting = t.status === 'awaiting_deposit' || t.status === 'confirming';
 
-    if (t.status === 'paid_out') kids.push(msg('ok', 'Paid. ₦' + t.payout_naira + ' is on its way to your bank account.'));
+    if (t.status === 'paid_out') {
+      kids.push(msg('ok', 'Paid. ₦' + t.payout_naira + ' is on its way to your bank account.'),
+        h('a', { href: '#/receipt/' + t.id, class: 'btn btn-primary btn-block' }, 'View receipt'), h('div', { class: 'spacer' }));
+    }
     else if (t.status === 'payout_failed') kids.push(msg('warn', 'Your deposit arrived, but the bank transfer did not go through. We are looking into it. Contact support and quote the trade ID below.'));
     else if (t.status === 'expired') kids.push(msg('bad', 'This quote expired. If you already sent crypto, contact support with the trade ID below. Otherwise, start a new trade.'));
     else if (t.status === 'confirming') kids.push(msg('info', 'We saw your deposit. We are waiting for the network to confirm it. You can leave this page.'));
@@ -515,7 +522,9 @@
       h('div', { class: 'kv' }, h('span', null, 'Email'), h('b', null, u.email)),
       h('div', { class: 'kv' }, h('span', null, 'Email status'), h('b', null, u.email_verified ? 'Confirmed' : 'Not confirmed yet')),
       h('div', { class: 'kv' }, h('span', null, 'Identity check'), h('b', null, KYC[u.kyc_status] || u.kyc_status)),
-      h('p', { class: 'small muted' }, 'Your trade limit depends on your identity check. Identity checks are not open yet.')));
+      h('p', { class: 'small muted' }, 'Your trade limit depends on your identity check.')));
+
+    kids.push(kycPanel(u));
 
     // Two-factor
     kids.push(twoFactorPanel(u));
@@ -542,6 +551,7 @@
         saveToken(null); S.user = null; S.flash = { kind: 'ok', text: 'You are logged out on every device.' }; go('#/login');
       }, handleErr);
     });
+    kids.push(referralPanel());
     kids.push(h('div', { class: 'panel' }, h('h2', null, 'Devices'), h('p', null, 'Lost a phone or used a shared computer? Log out everywhere.'), oBtn));
 
     holder.appendChild(h('div', { class: 'wrap narrow' }, h('h1', null, 'Settings'), kids));
@@ -592,6 +602,142 @@
     return wrap;
   }
 
+  // ---------- identity check, invite friends ----------
+  function kycPanel(u) {
+    var box = h('div');
+    var texts = {
+      unverified: 'Verify your identity to raise your trade limit.',
+      pending: 'We are reviewing your details. We will email you when it is done.',
+      verified: 'Your identity is verified. Your higher trade limit is active.',
+      rejected: 'We could not verify you. Check your details and try again.'
+    };
+    add(box, h('p', null, texts[u.kyc_status] || ''));
+    api('/api/kyc').then(function (k) {
+      if (k.submission && k.submission.status === 'rejected' && k.submission.note) add(box, msg('warn', 'Reason: ' + k.submission.note));
+    }, function () { /* the panel still works without the reason */ });
+    if (u.kyc_status === 'unverified' || u.kyc_status === 'rejected') {
+      add(box, h('a', { href: '#/verify', class: 'btn btn-primary btn-block' }, 'Verify my identity'));
+    }
+    return h('div', { class: 'panel' }, h('h2', null, 'Identity check'), box);
+  }
+
+  function referralPanel() {
+    var box = h('div', null, h('p', { class: 'muted' }, 'Loading…'));
+    api('/api/referrals').then(function (r) {
+      clear(box);
+      var linkBox = h('code', { class: 'addr' }, r.link);
+      var btn = h('button', { type: 'button', class: 'btn btn-ghost btn-block', onclick: function () { copyText(r.link, linkBox, btn); } }, 'Copy my link');
+      add(box,
+        h('p', null, 'Share your link. People who sign up with it are counted here.'), linkBox, btn, h('div', { class: 'spacer' }),
+        h('div', { class: 'kv' }, h('span', null, 'Sign-ups'), h('b', null, String(r.signups))),
+        h('div', { class: 'kv' }, h('span', null, 'Completed a trade'), h('b', null, String(r.paid_trades))));
+    }, function (e) { clear(box); add(box, msg('bad', e.message)); });
+    return h('div', { class: 'panel' }, h('h2', null, 'Invite friends'), box);
+  }
+
+  function verifyIdView() {
+    if (!S.user.email_verified) { S.flash = { kind: 'info', text: 'Confirm your email first.' }; return go('#/confirm'); }
+    if (S.user.kyc_status === 'verified' || S.user.kyc_status === 'pending') return go('#/settings');
+    var err = h('div');
+    var name = input('text', 'full_name', { autocomplete: 'name', required: true });
+    var dob = input('date', 'dob', { autocomplete: 'bday', required: true });
+    var type = h('select', { name: 'id_type' }, h('option', { value: 'BVN' }, 'BVN'), h('option', { value: 'NIN' }, 'NIN'));
+    var num = input('text', 'id_number', { inputmode: 'numeric', maxlength: '11', pattern: '[0-9]*', autocomplete: 'off', required: true });
+    var addr = h('textarea', { name: 'address', required: true, autocomplete: 'street-address', rows: '3' });
+    var btn = h('button', { type: 'submit', class: 'btn btn-primary btn-block' }, 'Submit for review');
+    var form = h('form', null,
+      field('Full name', name, 'As it appears on your ID.'), field('Date of birth', dob, 'If your phone shows no date picker, type it like 1994-03-21.'),
+      field('ID type', type), field('ID number', num, '11 digits. We store it encrypted.'),
+      field('Home address', addr), err, btn);
+    onSubmit(form, btn, err, function () {
+      return api('/api/kyc', { method: 'POST', body: { full_name: name.value, dob: dob.value, id_type: type.value, id_number: num.value, address: addr.value } }).then(function () {
+        S.user.kyc_status = 'pending';
+        S.flash = { kind: 'ok', text: 'Thank you. We are reviewing your details and will email you.' };
+        go('#/settings');
+      });
+    });
+    mount(shell('settings', h('div', { class: 'wrap narrow' }, h('div', { class: 'panel' }, h('h1', null, 'Verify your identity'),
+      h('p', null, 'This raises your trade limit and helps keep Kobodesk safe. Use your own details.'), form))), 'Verify identity');
+  }
+
+  // ---------- receipt ----------
+  function receiptView(id) {
+    var holder = h('div', null, h('p', { class: 'muted' }, 'Loading…'));
+    mount(shell('trades', holder), 'Receipt');
+    api('/api/trades/' + id + '/receipt').then(function (r) {
+      clear(holder);
+      var row = function (k, v) { return h('div', { class: 'kv' }, h('span', null, k), h('b', null, v)); };
+      holder.appendChild(h('div', { class: 'wrap narrow receipt' }, h('div', { class: 'panel' },
+        h('h1', null, 'Receipt'),
+        h('p', { class: 'small muted' }, r.receipt_no + (r.company_name ? ' · ' + r.company_name : '') + (r.rc_number ? ' · RC ' + r.rc_number : '')),
+        row('Naira paid to your bank', '₦' + r.payout_naira),
+        row('Date', fmtDate(r.date)), row('Sold', r.amount + ' ' + r.coin), row('Network', r.network),
+        row('Rate', '₦' + r.rate_naira + ' per ' + r.coin), row('Fee', '₦' + r.fee_naira),
+        row('Paid to', r.account_name + ', ' + r.bank_name + ', ending ' + r.account_last4),
+        row('Customer', r.customer_email), row('Trade ID', r.trade_id), r.payout_ref ? row('Bank reference', r.payout_ref) : null,
+        h('p', { class: 'small muted' }, 'This receipt confirms that the trade above was completed. Keep it for your records.'),
+        h('button', { type: 'button', class: 'btn btn-primary btn-block noprint', onclick: function () { window.print(); } }, 'Print or save as PDF'),
+        h('p', { class: 'center noprint' }, h('a', { href: '#/trade/' + id }, 'Back to trade')))));
+    }, handleErr);
+  }
+
+  // ---------- admin ----------
+  function adminView() {
+    if (!S.user.is_admin) return go('#/sell');
+    var holder = h('div', null, h('p', { class: 'muted' }, 'Loading…'));
+    mount(shell('admin', holder), 'Admin');
+    Promise.all([api('/api/admin/overview'), api('/api/admin/trades?status=payout_failed'), api('/api/admin/kyc')]).then(function (r) {
+      var o = r[0], failed = r[1], pending = r[2], by = o.trades_by_status || {};
+      var kv = function (k, v) { return h('div', { class: 'kv' }, h('span', null, k), h('b', null, v)); };
+      clear(holder);
+
+      var failedList = failed.length ? failed.map(function (t) {
+        var out = h('div');
+        var btn = h('button', { type: 'button', class: 'btn btn-ghost btn-block' }, 'Retry payout');
+        btn.addEventListener('click', function () {
+          btn.disabled = true; clear(out);
+          api('/api/admin/trades/' + t.id + '/retry-payout', { method: 'POST', body: {} }).then(adminView, function (e) { btn.disabled = false; add(out, msg('bad', e.message)); });
+        });
+        return h('div', { class: 'admin-item' },
+          h('div', { class: 'row-top' }, h('b', null, t.amount + ' ' + t.coin), badge(t.status)),
+          h('p', { class: 'small muted' }, t.id), out, btn);
+      }) : [h('p', { class: 'muted' }, 'No failed payouts.')];
+
+      var kycList = pending.length ? pending.map(function (k) {
+        var det = h('div');
+        var review = h('button', { type: 'button', class: 'btn btn-ghost btn-block' }, 'Review details');
+        review.addEventListener('click', function () {
+          review.disabled = true;
+          api('/api/admin/kyc/' + k.user_id).then(function (d) {
+            review.hidden = true;
+            var note = h('textarea', { name: 'note', rows: '2', 'aria-label': 'Reason (needed to reject)' });
+            var out = h('div');
+            var decide = function (status) {
+              clear(out);
+              api('/api/admin/kyc/' + k.user_id + '/decision', { method: 'POST', body: { status: status, note: note.value } }).then(adminView, function (e) { add(out, msg('bad', e.message)); });
+            };
+            add(det, kv('Name', d.full_name), kv('Date of birth', d.dob), kv(d.id_type, d.id_number), kv('Address', d.address),
+              h('div', { class: 'field' }, h('label', null, 'Reason (needed to reject)'), note), out,
+              h('button', { type: 'button', class: 'btn btn-primary btn-block', onclick: function () { decide('verified'); } }, 'Approve'),
+              h('div', { class: 'spacer' }),
+              h('button', { type: 'button', class: 'btn btn-ghost btn-block', onclick: function () { decide('rejected'); } }, 'Reject'));
+          }, function (e) { review.disabled = false; add(det, msg('bad', e.message)); });
+        });
+        return h('div', { class: 'admin-item' },
+          h('div', { class: 'row-top' }, h('b', null, k.full_name), h('span', { class: 'badge badge-warn' }, k.id_type + ' ending ' + k.id_last4)),
+          h('p', { class: 'small muted' }, k.email + ' · ' + fmtDate(new Date(k.submitted_at).toISOString())), det, review);
+      }) : [h('p', { class: 'muted' }, 'No identity checks waiting.')];
+
+      holder.appendChild(h('div', { class: 'wrap narrow' },
+        h('h1', null, 'Admin'),
+        h('div', { class: 'panel' }, h('h2', null, 'Overview'),
+          kv('Customers', String(o.users)), kv('Paid out', '₦' + o.paid_out_naira), kv('Paid trades', String(by.paid_out || 0)),
+          kv('In progress', String((by.awaiting_deposit || 0) + (by.confirming || 0) + (by.paying_out || 0)))),
+        h('div', { class: 'panel' }, h('h2', null, 'Failed payouts'), failedList),
+        h('div', { class: 'panel' }, h('h2', null, 'Identity checks to review'), h('p', { class: 'small muted' }, 'Opening details is recorded in the activity log.'), kycList)));
+    }, handleErr);
+  }
+
   // ---------- routing ----------
   function handleErr(e) {
     if (e && e.status === 401 && e.code === 'unauthorized') {
@@ -618,14 +764,18 @@
     var open = { '/login': loginView, '/signup': signupView, '/forgot': forgotView };
     if (open[path]) { if (S.token) return go('#/sell'); return open[path](); }
     if (path === '/confirm') return authed(confirmView);
+    if (path === '/verify') return authed(verifyIdView);
+    if (path === '/admin') return authed(adminView);
     if (path === '/sell') return authed(sellView);
     if (path === '/trades') return authed(tradesView);
     if (path === '/settings') return authed(settingsView);
+    if ((m = path.match(/^\/receipt\/([\w-]+)$/))) return authed(function () { receiptView(m[1]); });
     if ((m = path.match(/^\/trade\/([\w-]+)$/))) return authed(function () { tradeView(m[1]); });
     return go(S.token ? '#/sell' : '#/login');
   }
 
   loadToken();
+  captureRef();
   window.addEventListener('hashchange', route);
   api('/api/health', { anon: true }).then(function (r) { S.mode = r.mode; }, function () { /* keep default */ }).then(route);
 })();
