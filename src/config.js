@@ -35,6 +35,17 @@ export function loadConfig(overrides = {}) {
     smtpSecure: env.SMTP_SECURE !== '0',
     smtpUser: env.SMTP_USER || '',
     smtpPass: env.SMTP_PASS || '',
+    ratesSource: env.RATES_SOURCE || 'sample',
+    ratesUrl: env.RATES_URL || 'https://api.coingecko.com/api/v3/simple/price',
+    companyName: env.COMPANY_NAME || '',
+    rcNumber: env.RC_NUMBER || '',
+    secRegistration: env.SEC_REGISTRATION || '',
+    supportEmail: env.SUPPORT_EMAIL || '',
+    supportWhatsapp: (env.SUPPORT_WHATSAPP || '').replace(/\D/g, ''),
+    supportHours: env.SUPPORT_HOURS || '',
+    payoutTime: env.PAYOUT_TIME || '',
+    analyticsDomain: env.ANALYTICS_DOMAIN || '',
+    stuckMinutes: int(env.STUCK_MINUTES, 10),
     spreadBps: int(env.SPREAD_BPS, 150),
     flatFeeKobo: int(env.FLAT_FEE_KOBO, 0),
     quoteTtlSeconds: int(env.QUOTE_TTL_SECONDS, 900),
@@ -66,6 +77,12 @@ export function loadConfig(overrides = {}) {
     if (cfg.mailProvider === 'smtp' && (!cfg.smtpUser || !cfg.smtpPass)) throw new Error('SMTP_USER and SMTP_PASS are required for the smtp provider.');
     if (!cfg.corsOrigin) cfg.corsOrigin = new URL(cfg.publicUrl).origin;
     if (cfg.corsOrigin === '*') throw new Error('CORS_ORIGIN cannot be * outside sandbox mode.');
+    if (cfg.ratesSource !== 'live') throw new Error('Set RATES_SOURCE=live outside sandbox mode. Sample prices must never be used for real trades.');
+    for (const [name, value] of [['COMPANY_NAME', cfg.companyName], ['SUPPORT_EMAIL', cfg.supportEmail], ['SUPPORT_HOURS', cfg.supportHours], ['PAYOUT_TIME', cfg.payoutTime]]) {
+      if (!value) throw new Error(`${name} is required outside sandbox mode. Customers see it on the site.`);
+    }
+    if (!cfg.adminEmails.length) throw new Error('ADMIN_EMAILS is required outside sandbox mode, so someone receives payout alerts.');
   }
+  if (cfg.analyticsDomain && !/^[a-z0-9.-]+$/i.test(cfg.analyticsDomain)) throw new Error('ANALYTICS_DOMAIN must be a plain domain name such as kobodesk.com.');
   return cfg;
 }

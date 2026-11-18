@@ -54,6 +54,20 @@ CREATE TABLE IF NOT EXISTS deposits (
   updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS kyc_submissions (
+  user_id TEXT PRIMARY KEY REFERENCES users(id),
+  full_name TEXT NOT NULL,
+  dob TEXT NOT NULL,
+  id_type TEXT NOT NULL,
+  id_number_enc TEXT NOT NULL,
+  id_last4 TEXT NOT NULL,
+  address TEXT NOT NULL,
+  status TEXT NOT NULL,
+  note TEXT,
+  submitted_at INTEGER NOT NULL,
+  reviewed_at INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS email_tokens (
   token_hash TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
@@ -81,6 +95,8 @@ const USER_COLUMNS = [
   ['verify_code_hash', 'TEXT'],
   ['verify_code_expires', 'INTEGER NOT NULL DEFAULT 0'],
   ['verify_code_attempts', 'INTEGER NOT NULL DEFAULT 0'],
+  ['referral_code', 'TEXT'],
+  ['referred_by', 'TEXT'],
 ];
 
 export function openDb(dbPath) {
@@ -92,6 +108,8 @@ export function openDb(dbPath) {
   for (const [name, def] of USER_COLUMNS) {
     if (!have.has(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${def}`);
   }
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_referral_idx ON users(referral_code)');
+  db.exec('CREATE INDEX IF NOT EXISTS users_referred_by_idx ON users(referred_by)');
   return db;
 }
 

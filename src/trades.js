@@ -4,13 +4,8 @@ import { tx, logEvent } from './db.js';
 import { parseAmount, formatAmount, toKobo, formatNaira } from './money.js';
 import { getSellRates } from './rates.js';
 
-export class HttpError extends Error {
-  constructor(status, message, code) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
+import { HttpError } from './errors.js';
+export { HttpError };
 
 // Trade life cycle:
 //   awaiting_deposit -> confirming -> paying_out -> paid_out
@@ -101,7 +96,7 @@ export async function createTrade({ db, config, providers, user, input }) {
 
 // Called when the crypto provider reports a deposit (or the sandbox simulates one).
 // Safe to call many times for the same tx_hash: confirmations update, but money moves once.
-export async function applyDeposit({ db, config, providers }, event) {
+export async function applyDeposit({ db, config, providers, notifier }, event) {
   const required = (trade) => ASSETS[trade.coin]?.requiredConfirmations?.[trade.network] ?? 12;
   const received = parseAmount(event.amount);
   const confirmations = Number.parseInt(event.confirmations, 10);
@@ -138,7 +133,7 @@ export async function applyDeposit({ db, config, providers }, event) {
     if (dep.confirmations < required(t)) {
       db.prepare("UPDATE trades SET status = 'confirming', received_scaled = ?, updated_at = ? WHERE id = ?")
         .run(dep.amount_scaled, now, t.id);
-      return { waiting: true };
+      return { waiting: true, first: t.status !== 'confirming' };
     }
     // Enough confirmations: claim the payout exactly once.
     const claim = db
@@ -148,7 +143,10 @@ export async function applyDeposit({ db, config, providers }, event) {
   });
 
   if (claimed.done) return { result: `already_${claimed.done}` };
-  if (claimed.waiting) return { result: 'confirming' };
+  if (claimed.waiting) {
+    if (claimed.first) await notifier?.trade(trade.id, 'deposit_seen');
+    return { result: 'confirming' };
+  }
 
   // Price the payout: locked rate if the deposit was first seen before the quote expired.
   const { deposit, trade: t } = claimed;
@@ -161,13 +159,14 @@ export async function applyDeposit({ db, config, providers }, event) {
   if (payout <= 0) {
     db.prepare("UPDATE trades SET status = 'payout_failed', failure_reason = ?, updated_at = ? WHERE id = ?")
       .run('Deposit too small to pay out after fees.', Date.now(), t.id);
+    await notifier?.trade(t.id, 'payout_failed');
     return { result: 'payout_failed' };
   }
   db.prepare('UPDATE trades SET payout_kobo = ?, updated_at = ? WHERE id = ?').run(payout, Date.now(), t.id);
-  return runPayout({ db, providers }, t.id);
+  return runPayout({ db, providers, notifier }, t.id);
 }
 
-export async function runPayout({ db, providers }, tradeId) {
+export async function runPayout({ db, providers, notifier }, tradeId) {
   const t = db.prepare('SELECT * FROM trades WHERE id = ?').get(tradeId);
   const account = db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(t.bank_account_id);
   const reference = `kd_${t.id}`; // same reference on every retry, so the bank never pays twice
@@ -187,11 +186,13 @@ export async function runPayout({ db, providers }, tradeId) {
     db.prepare("UPDATE trades SET status = 'paid_out', payout_ref = ?, failure_reason = NULL, updated_at = ? WHERE id = ?")
       .run(outcome.reference ?? reference, Date.now(), t.id);
     logEvent(db, t.id, 'paid_out', { payout_kobo: t.payout_kobo });
+    await notifier?.trade(t.id, 'paid_out');
     return { result: 'paid_out' };
   }
   db.prepare("UPDATE trades SET status = 'payout_failed', failure_reason = ?, updated_at = ? WHERE id = ?")
     .run(String(outcome.error ?? 'Payout failed'), Date.now(), t.id);
   logEvent(db, t.id, 'payout_failed', { error: outcome.error });
+  await notifier?.trade(t.id, 'payout_failed');
   return { result: 'payout_failed' };
 }
 

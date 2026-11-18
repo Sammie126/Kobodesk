@@ -13,7 +13,9 @@ import { createProviders } from './providers/index.js';
 import { createMailer } from './mail.js';
 import { newSecret, verifyCode, otpauthUri } from './totp.js';
 import { getSellRates } from './rates.js';
-import { formatNaira, formatAmount } from './money.js';
+import { makeNotifier, alertStuck } from './ops.js';
+import { logEvent } from './db.js';
+import { formatNaira, formatAmount, SCALE } from './money.js';
 import {
   HttpError, tradeView, createTrade, priceTrade, applyDeposit, retryPayout, expireStaleTrades,
 } from './trades.js';
@@ -26,17 +28,22 @@ const TYPES = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
 };
-const CSP = [
-  "default-src 'self'", "script-src 'self'", "style-src 'self' https://fonts.googleapis.com",
-  "font-src https://fonts.gstatic.com", "img-src 'self' data:", "connect-src 'self'",
+const buildCsp = (analyticsDomain) => [
+  "default-src 'self'",
+  `script-src 'self'${analyticsDomain ? ' https://plausible.io' : ''}`,
+  "style-src 'self' https://fonts.googleapis.com",
+  "font-src https://fonts.gstatic.com", "img-src 'self' data:",
+  `connect-src 'self'${analyticsDomain ? ' https://plausible.io' : ''}`,
   "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'",
 ].join('; ');
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 export function createApp(config, opts = {}) {
   const db = opts.db ?? openDb(config.dbPath);
   const providers = opts.providers ?? createProviders(config);
   const mailer = opts.mailer ?? createMailer(config);
-  const ctxBase = { db, config, providers };
+  const notifier = makeNotifier({ db, config, mailer });
+  const ctxBase = { db, config, providers, notifier };
   const routes = [];
   const route = (method, p, handler, o = {}) =>
     routes.push({ method, re: new RegExp('^' + p.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '$'), handler, ...o });
@@ -58,7 +65,9 @@ export function createApp(config, opts = {}) {
   const userView = (u) => ({
     id: u.id, email: u.email, kyc_status: u.kyc_status,
     email_verified: !!u.email_verified, totp_enabled: !!u.totp_enabled,
+    is_admin: config.adminEmails.includes(u.email),
   });
+  const newRefCode = () => crypto.randomBytes(5).toString('hex').toUpperCase();
   const tokenFor = (u) => signToken({ sub: u.id, v: u.token_version }, config.tokenSecret, config.tokenTtlSeconds);
   const clientIp = (req) => {
     if (config.trustProxy) {
@@ -149,8 +158,10 @@ export function createApp(config, opts = {}) {
       throw new HttpError(409, 'An account with this email already exists.', 'email_taken');
     }
     const id = newId('usr');
-    db.prepare('INSERT INTO users (id, email, password_hash, kyc_status, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(id, email, hashPassword(body.password), 'unverified', Date.now());
+    const ref = String(body.ref ?? '').trim().toUpperCase();
+    const referrer = /^[0-9A-F]{10}$/.test(ref) ? db.prepare('SELECT id FROM users WHERE referral_code = ?').get(ref) : null;
+    db.prepare('INSERT INTO users (id, email, password_hash, kyc_status, created_at, referral_code, referred_by) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(id, email, hashPassword(body.password), 'unverified', Date.now(), newRefCode(), referrer?.id ?? null);
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     await sendVerification(user);
     return { status: 201, body: { token: tokenFor(user), user: userView(user) } };
@@ -324,6 +335,89 @@ export function createApp(config, opts = {}) {
     return { body: tradeView(t) };
   }, { auth: true });
 
+  route('GET', '/api/site-config', () => ({
+    body: {
+      company_name: config.companyName, rc_number: config.rcNumber, sec_registration: config.secRegistration,
+      support_email: config.supportEmail, support_whatsapp: config.supportWhatsapp,
+      support_hours: config.supportHours, payout_time: config.payoutTime,
+    },
+  }));
+
+  // ---------- Receipts ----------
+  route('GET', '/api/trades/:id/receipt', ({ user, params }) => {
+    const t = db.prepare('SELECT * FROM trades WHERE id = ? AND user_id = ?').get(params.id, user.id);
+    if (!t) throw new HttpError(404, 'Trade not found.', 'not_found');
+    if (t.status !== 'paid_out') throw new HttpError(409, 'A receipt is available once the trade is paid.', 'not_paid');
+    const bank = db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(t.bank_account_id);
+    const received = t.received_scaled ?? t.amount_scaled;
+    const effectiveRate = Number(((BigInt(t.payout_kobo) + BigInt(t.fee_kobo)) * SCALE) / BigInt(received)); // kobo per coin actually paid
+    return {
+      body: {
+        receipt_no: `KD-${t.id.slice(4).toUpperCase()}`, trade_id: t.id,
+        date: new Date(t.updated_at).toISOString(), customer_email: user.email,
+        coin: t.coin, network: t.network, amount: formatAmount(received),
+        rate_naira: formatNaira(effectiveRate), fee_naira: formatNaira(t.fee_kobo), payout_naira: formatNaira(t.payout_kobo),
+        bank_name: bank.bank_name, account_name: bank.account_name, account_last4: bank.account_number.slice(-4),
+        payout_ref: t.payout_ref, company_name: config.companyName, rc_number: config.rcNumber,
+      },
+    };
+  }, { auth: true });
+
+  // ---------- Referrals ----------
+  route('GET', '/api/referrals', ({ user }) => {
+    let code = user.referral_code;
+    for (let i = 0; !code && i < 5; i++) {
+      const candidate = newRefCode();
+      try { db.prepare('UPDATE users SET referral_code = ? WHERE id = ?').run(candidate, user.id); code = candidate; } catch { /* try again */ }
+    }
+    const signups = db.prepare('SELECT COUNT(*) n FROM users WHERE referred_by = ?').get(user.id).n;
+    const paid = db.prepare("SELECT COUNT(DISTINCT u.id) n FROM users u JOIN trades t ON t.user_id = u.id WHERE u.referred_by = ? AND t.status = 'paid_out'").get(user.id).n;
+    return { body: { code, link: `${config.publicUrl}/app.html?ref=${code}#/signup`, signups, paid_trades: paid } };
+  }, { auth: true });
+
+  // ---------- Identity verification (KYC) ----------
+  route('GET', '/api/kyc', ({ user }) => ({
+    body: {
+      status: user.kyc_status,
+      submission: db.prepare('SELECT full_name, id_type, id_last4, status, note, submitted_at FROM kyc_submissions WHERE user_id = ?').get(user.id) ?? null,
+    },
+  }), { auth: true });
+
+  route('POST', '/api/kyc', async ({ user, body }) => {
+    if (!user.email_verified) throw new HttpError(403, 'Confirm your email before you verify your identity.', 'verify_email');
+    if (user.kyc_status === 'verified') throw new HttpError(409, 'Your identity is already verified.', 'already_verified');
+    if (user.kyc_status === 'pending') throw new HttpError(409, 'Your details are being reviewed.', 'already_pending');
+    const fullName = String(body.full_name ?? '').trim().replace(/\s+/g, ' ');
+    if (fullName.length < 5 || fullName.length > 120 || !fullName.includes(' ')) {
+      throw new HttpError(400, 'Enter your full name as it appears on your ID.', 'bad_name');
+    }
+    const dob = String(body.dob ?? '');
+    const born = /^\d{4}-\d{2}-\d{2}$/.test(dob) ? new Date(`${dob}T00:00:00Z`) : null;
+    if (!born || Number.isNaN(born.getTime()) || born.toISOString().slice(0, 10) !== dob) {
+      throw new HttpError(400, 'Enter your date of birth as year-month-day, for example 1994-03-21.', 'bad_dob');
+    }
+    const now = new Date();
+    const age = now.getUTCFullYear() - born.getUTCFullYear() - (now < new Date(Date.UTC(now.getUTCFullYear(), born.getUTCMonth(), born.getUTCDate())) ? 1 : 0);
+    if (age < 18 || age > 110) throw new HttpError(400, 'You must be at least 18 years old to trade.', 'bad_age');
+    const idType = String(body.id_type ?? '').toUpperCase();
+    const idNumber = String(body.id_number ?? '').replace(/\s+/g, '');
+    if (!['BVN', 'NIN'].includes(idType)) throw new HttpError(400, 'Choose BVN or NIN.', 'bad_id_type');
+    if (!/^\d{11}$/.test(idNumber)) throw new HttpError(400, `A ${idType} has 11 digits.`, 'bad_id_number');
+    const address = String(body.address ?? '').trim().replace(/\s+/g, ' ');
+    if (address.length < 10 || address.length > 250) throw new HttpError(400, 'Enter your full home address.', 'bad_address');
+
+    // The ID number is stored encrypted. Only the last 4 digits are kept readable.
+    tx(db, () => {
+      db.prepare(`INSERT OR REPLACE INTO kyc_submissions
+        (user_id, full_name, dob, id_type, id_number_enc, id_last4, address, status, note, submitted_at, reviewed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, NULL)`)
+        .run(user.id, fullName, dob, idType, encryptSecret(idNumber, config.dataKey), idNumber.slice(-4), address, Date.now());
+      db.prepare("UPDATE users SET kyc_status = 'pending' WHERE id = ?").run(user.id);
+    });
+    await notifier.toAdmins('Identity check waiting for review', `${user.email} submitted their details. Open the admin page to review them.`);
+    return { body: { status: 'pending' } };
+  }, { auth: true });
+
   // ---------- Crypto provider webhook ----------
   route('POST', '/api/webhooks/crypto', async ({ body, raw, req }) => {
     if (!verifyWebhook(raw, req.headers['x-signature'], config.webhookSecret)) {
@@ -371,6 +465,56 @@ export function createApp(config, opts = {}) {
     return { body: { id: params.id, kyc_status: status } };
   }, { auth: true, admin: true });
 
+  route('GET', '/api/admin/overview', () => {
+    const by = Object.fromEntries(db.prepare('SELECT status, COUNT(*) n FROM trades GROUP BY status').all().map((r) => [r.status, r.n]));
+    return {
+      body: {
+        trades_by_status: by,
+        users: db.prepare('SELECT COUNT(*) n FROM users').get().n,
+        pending_kyc: db.prepare("SELECT COUNT(*) n FROM kyc_submissions WHERE status = 'pending'").get().n,
+        paid_out_kobo: db.prepare("SELECT COALESCE(SUM(payout_kobo), 0) s FROM trades WHERE status = 'paid_out'").get().s,
+        paid_out_naira: formatNaira(db.prepare("SELECT COALESCE(SUM(payout_kobo), 0) s FROM trades WHERE status = 'paid_out'").get().s),
+      },
+    };
+  }, { auth: true, admin: true });
+
+  route('GET', '/api/admin/kyc', ({ query }) => {
+    const status = query.get('status') || 'pending';
+    return {
+      body: db.prepare(`SELECT k.user_id, u.email, k.full_name, k.id_type, k.id_last4, k.status, k.submitted_at
+        FROM kyc_submissions k JOIN users u ON u.id = k.user_id WHERE k.status = ? ORDER BY k.submitted_at LIMIT 200`).all(status),
+    };
+  }, { auth: true, admin: true });
+
+  // Opening the full details is recorded, because they hold a government ID number.
+  route('GET', '/api/admin/kyc/:id', ({ params, user }) => {
+    const k = db.prepare('SELECT k.*, u.email FROM kyc_submissions k JOIN users u ON u.id = k.user_id WHERE k.user_id = ?').get(params.id);
+    if (!k) throw new HttpError(404, 'No submission found.', 'not_found');
+    logEvent(db, null, 'kyc_viewed', { admin: user.email, user: params.id });
+    return {
+      body: {
+        user_id: k.user_id, email: k.email, full_name: k.full_name, dob: k.dob, id_type: k.id_type,
+        id_number: decryptSecret(k.id_number_enc, config.dataKey), address: k.address, status: k.status, submitted_at: k.submitted_at,
+      },
+    };
+  }, { auth: true, admin: true });
+
+  route('POST', '/api/admin/kyc/:id/decision', async ({ params, body, user }) => {
+    const status = String(body.status ?? '');
+    const note = String(body.note ?? '').trim().slice(0, 300);
+    if (!['verified', 'rejected'].includes(status)) throw new HttpError(400, 'Choose verified or rejected.', 'bad_status');
+    if (status === 'rejected' && !note) throw new HttpError(400, 'Give the customer a reason.', 'note_required');
+    const k = db.prepare('SELECT * FROM kyc_submissions WHERE user_id = ?').get(params.id);
+    if (!k) throw new HttpError(404, 'No submission found.', 'not_found');
+    tx(db, () => {
+      db.prepare('UPDATE kyc_submissions SET status = ?, note = ?, reviewed_at = ? WHERE user_id = ?').run(status, note || null, Date.now(), params.id);
+      db.prepare('UPDATE users SET kyc_status = ? WHERE id = ?').run(status, params.id);
+    });
+    logEvent(db, null, 'kyc_decision', { admin: user.email, user: params.id, status });
+    await notifier.kyc(params.id, status, note);
+    return { body: { user_id: params.id, status } };
+  }, { auth: true, admin: true });
+
   // For a customer who lost their phone. Confirm who they are first.
   route('POST', '/api/admin/users/:id/reset-2fa', ({ params }) => {
     const r = db.prepare('UPDATE users SET totp_enabled = 0, totp_secret = NULL, token_version = token_version + 1 WHERE id = ?').run(params.id);
@@ -404,7 +548,16 @@ export function createApp(config, opts = {}) {
   };
 
   async function serveStatic(req, res, pathname) {
-    let rel = decodeURIComponent(pathname);
+    if (pathname === '/robots.txt' || pathname === '/sitemap.xml') {
+      const isRobots = pathname === '/robots.txt';
+      const text = isRobots
+        ? `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /app.html\nSitemap: ${config.publicUrl}/sitemap.xml\n`
+        : `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${['/', '/terms.html', '/privacy.html'].map((p) => `  <url><loc>${config.publicUrl}${p}</loc></url>`).join('\n')}\n</urlset>\n`;
+      res.writeHead(200, { ...baseHeaders(), 'content-type': isRobots ? 'text/plain; charset=utf-8' : 'application/xml; charset=utf-8', 'cache-control': 'public, max-age=3600' });
+      return res.end(req.method === 'HEAD' ? undefined : text);
+    }
+    let rel;
+    try { rel = decodeURIComponent(pathname); } catch { throw new HttpError(404, 'Not found.', 'not_found'); }
     if (rel === '/') rel = '/index.html';
     if (!/^\/[a-zA-Z0-9._\-\/]+$/.test(rel) || rel.includes('..')) throw new HttpError(404, 'Not found.', 'not_found');
     const file = path.join(WEB_ROOT, rel);
@@ -412,8 +565,14 @@ export function createApp(config, opts = {}) {
     if (!type || !file.startsWith(WEB_ROOT + path.sep)) throw new HttpError(404, 'Not found.', 'not_found');
     let data;
     try { data = await fs.readFile(file); } catch { throw new HttpError(404, 'Not found.', 'not_found'); }
-    const headers = { ...baseHeaders(), 'content-type': type, 'cache-control': type.startsWith('text/html') ? 'no-cache' : 'public, max-age=3600' };
-    if (type.startsWith('text/html')) headers['content-security-policy'] = CSP;
+    const isHtml = type.startsWith('text/html');
+    const headers = { ...baseHeaders(), 'content-type': type, 'cache-control': isHtml || rel === '/sw.js' ? 'no-cache' : 'public, max-age=3600' };
+    if (isHtml) {
+      headers['content-security-policy'] = buildCsp(config.analyticsDomain);
+      const analytics = config.analyticsDomain
+        ? `<script defer data-domain="${escapeHtml(config.analyticsDomain)}" src="https://plausible.io/js/script.js"></script>` : '';
+      data = Buffer.from(data.toString('utf8').replaceAll('%PUBLIC_URL%', escapeHtml(config.publicUrl)).replace('<!--ANALYTICS-->', analytics), 'utf8');
+    }
     res.writeHead(200, headers);
     res.end(req.method === 'HEAD' ? undefined : data);
   }
@@ -468,9 +627,13 @@ export function createApp(config, opts = {}) {
     }
   });
 
-  const sweeper = setInterval(() => expireStaleTrades(db), 60 * 1000);
+  let tick = 0;
+  const sweeper = setInterval(() => {
+    expireStaleTrades(db);
+    if (++tick % 5 === 0) alertStuck(ctxBase).catch((err) => console.error('Stuck-trade check failed:', err.message));
+  }, 60 * 1000);
   sweeper.unref();
   server.on('close', () => clearInterval(sweeper));
 
-  return { server, db, providers, mailer };
+  return { server, db, providers, mailer, notifier };
 }
