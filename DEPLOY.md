@@ -45,3 +45,7 @@ Create an account on your live site with an email you control. You should get an
 ## 4. Back up the database
 
 All accounts and trades are in the file at `/data/kobodesk.db`. Turn on the host's volume snapshots, or copy the file on a schedule.
+
+
+## New settings
+See `.env.example` for RATES_SOURCE, COMPANY_NAME, RC_NUMBER, SUPPORT_EMAIL, SUPPORT_WHATSAPP, SUPPORT_HOURS, PAYOUT_TIME, ANALYTICS_DOMAIN and STUCK_MINUTES. In live mode the server will not start without the company, support and rates settings. Go through LAUNCH_CHECKLIST.md before taking customers.

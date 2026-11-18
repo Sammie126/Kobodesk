@@ -103,3 +103,7 @@ Setting `MODE` to anything other than `sandbox` makes the server refuse to start
 - Customers must confirm their email with a 6-digit code before they can trade. Email is sent through Gmail SMTP or Resend; neither has been run against the live service from the build environment, so send yourself a test first.
 - Identity checks (KYC) are not built. Every customer stays "unverified" and gets the lower limit until an admin sets their status.
 - Sessions are 7-day tokens. A customer can log out of every device, but not one at a time.
+
+
+## Features added for launch
+Identity check (manual review), receipts (print/PDF), referral links, admin page (overview, failed payout retry, KYC review), email alerts for deposits/payouts/stuck trades, legal page drafts, SEO/sharing tags, optional analytics, installable app (PWA). See LAUNCH_CHECKLIST.md and PROVIDERS.md.
