@@ -166,7 +166,7 @@ test('rates and assets are public; bad JSON is a clean 400', async () => {
 
 test('live mode refuses to start on fake providers', () => {
   const live = loadConfig({
-    mode: 'live', tokenSecret: 'x'.repeat(32), webhookSecret: 'y'.repeat(32), dataKey: 'z'.repeat(32),
+    mode: 'live', ratesSource: 'live', companyName: 'Kobodesk Ltd', supportEmail: 'help@kobodesk.example', supportHours: '8am to 8pm', payoutTime: '5 minutes', adminEmails: ['ops@kobodesk.example'], tokenSecret: 'x'.repeat(32), webhookSecret: 'y'.repeat(32), dataKey: 'z'.repeat(32),
     publicUrl: 'https://kobodesk.example', mailProvider: 'resend', mailApiKey: 'k', mailFrom: 'no-reply@kobodesk.example',
   });
   assert.throws(() => createApp(live, { db: app.db }), /No live providers/);

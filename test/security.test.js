@@ -176,11 +176,14 @@ test('public quote endpoint prices a trade and rejects bad input', async () => {
 });
 
 test('live mode refuses weak configuration', () => {
-  const good = { mode: 'live', tokenSecret: 'a'.repeat(32), webhookSecret: 'b'.repeat(32), dataKey: 'c'.repeat(32),
+  const good = { mode: 'live', ratesSource: 'live', companyName: 'Kobodesk Ltd', supportEmail: 'help@kobodesk.example', supportHours: '8am to 8pm', payoutTime: '5 minutes', adminEmails: ['ops@kobodesk.example'], tokenSecret: 'a'.repeat(32), webhookSecret: 'b'.repeat(32), dataKey: 'c'.repeat(32),
     publicUrl: 'https://kobodesk.example', mailProvider: 'resend', mailApiKey: 'k', mailFrom: 'Kobodesk <no-reply@kobodesk.example>' };
   assert.doesNotThrow(() => loadConfig(good));
   assert.throws(() => loadConfig({ ...good, publicUrl: 'http://kobodesk.example' }), /https/);
   assert.throws(() => loadConfig({ ...good, dataKey: 'a'.repeat(32) }), /different/);
   assert.throws(() => loadConfig({ ...good, mailProvider: 'console' }), /email provider/);
   assert.throws(() => loadConfig({ ...good, tokenSecret: 'short' }), /TOKEN_SECRET/);
+  assert.throws(() => loadConfig({ ...good, ratesSource: 'sample' }), /RATES_SOURCE/);
+  assert.throws(() => loadConfig({ ...good, companyName: '' }), /COMPANY_NAME/);
+  assert.throws(() => loadConfig({ ...good, adminEmails: [] }), /ADMIN_EMAILS/);
 });
