@@ -36,6 +36,7 @@
     </a>
     <nav class="links" aria-label="Main">
       <a href="#how" class="hide-sm">How it works</a>
+      <a href="#security" class="hide-sm">Security</a>
       <a href="#assets" class="hide-sm">Assets</a>
       <a href="#faq" class="hide-sm">FAQ</a>
       <a href="/app.html#/login">Log in</a>
@@ -88,15 +89,99 @@
       <div class="railnav" data-rail="rail-steps"><button type="button" class="railbtn" data-dir="-1" aria-label="Previous step">&#8249;</button><button type="button" class="railbtn" data-dir="1" aria-label="Next step">&#8250;</button></div>
     </div>
     <div class="rail" id="rail-steps" tabindex="0" role="region" aria-label="Steps. Swipe sideways to see more." style="--cols:3">
-      <div class="card"><span class="step">Step 1</span><h3>Set up your account</h3><p>Sign up with your email, confirm it with a 6-digit code, and add the Nigerian bank account where you want your naira.</p></div>
-      <div class="card"><span class="step">Step 2</span><h3>Pick a coin, get an address</h3><p>Choose the coin and network, enter the amount, and check the naira you will receive. Then copy the deposit address.</p></div>
-      <div class="card"><span class="step">Step 3</span><h3>Send and get paid</h3><p>Send the crypto from your wallet. When it is confirmed on the network, your naira is paid to your bank in <span data-cfg="payout_time">[YOUR PAYOUT TIME]</span>.</p></div>
+      <div class="card how">
+        <span class="step">Step 1</span>
+        <h3>Account Setup</h3>
+        <p class="lede">Create your account once. It takes a few minutes, and you only do it the first time.</p>
+        <ul class="checks">
+          <li><b>Sign up with your email.</b> We send a 6-digit code to confirm it is really yours. The code works for 15 minutes.</li>
+          <li><b>Add your bank account.</b> Choose your Nigerian bank and enter your account number. The account name comes back from the bank lookup so you can check it before you save.</li>
+          <li><b>Add extra protection if you like.</b> Turn on two-factor sign-in, and verify your identity later to raise your trade limit.</li>
+        </ul>
+      </div>
+      <div class="card how">
+        <span class="step">Step 2</span>
+        <h3>Choose Crypto &amp; Get Address</h3>
+        <p class="lede">See exactly what you will receive before you send anything.</p>
+        <ul class="checks">
+          <li><b>Pick your coin and network.</b> USDT, BTC, ETH or SOL, on the network your wallet will use.</li>
+          <li><b>Check your naira amount.</b> We show it up front and lock the rate for a short time. A countdown on the trade page shows how long is left.</li>
+          <li><b>Copy your deposit address.</b> It belongs to this trade only. The page shows the coin and network to use, so you can match them in your wallet.</li>
+        </ul>
+      </div>
+      <div class="card how">
+        <span class="step">Step 3</span>
+        <h3>Send Crypto &amp; Receive Naira</h3>
+        <p class="lede">Send from your wallet, then follow each stage on your trade page. You can close the page and come back.</p>
+        <ul class="checks">
+          <li><b>Network confirmations.</b> Your transfer must be confirmed on the blockchain first. The number of confirmations needed depends on the coin and network.</li>
+          <li><b>Transaction verification.</b> We match the deposit to your trade by address, coin and network. If the amount you send differs from the amount you entered, we pay for the amount we actually receive.</li>
+          <li><b>Bank payout.</b> Once the deposit is verified, we send your naira to the bank account you saved and email you. Your receipt is ready when the trade shows Paid. <span data-cfg-if="payout_time" hidden>Payout time: <span data-cfg="payout_time"></span>.</span></li>
+        </ul>
+      </div>
     </div>
     <p class="swipe-hint">Swipe sideways to see every step</p>
   </div>
 </section>
 
-<section id="assets" class="band band-white">
+<section id="security" class="band band-white">
+  <div class="wrap sec">
+    <div class="sec-head">
+      <span class="eyebrow">Security &amp; trust</span>
+      <h2>Your Security Comes First</h2>
+      <p class="sub sub-wide">These are the protections built into Kobodesk today, so you can see how your account, your details and your trades are looked after.</p>
+    </div>
+    <div class="sec-grid">
+      <article class="scard">
+        <div class="sicon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F2B33D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
+        <h3>Account Protection</h3>
+        <p class="lede">Only you should be able to get into your account.</p>
+        <ul class="checks">
+          <li>Passwords are stored as one-way hashes, never as readable text.</li>
+          <li>New accounts confirm their email with a one-time 6-digit code that expires after 15 minutes and allows only a few attempts.</li>
+          <li>Optional two-factor sign-in with an authenticator app adds a second check at login.</li>
+          <li>Repeated login attempts are slowed down, and you can log out of every device in one tap. Changing or resetting your password also signs out your other devices.</li>
+        </ul>
+      </article>
+      <article class="scard">
+        <div class="sicon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F2B33D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg></div>
+        <h3>Data Protection</h3>
+        <p class="lede">We keep sensitive details locked down and limit who sees them.</p>
+        <ul class="checks">
+          <li>Your BVN or NIN and your two-factor key are encrypted before they are stored.</li>
+          <li>In our team's review lists, an ID number shows only its last 4 digits. Each time a team member opens the full details, the access is recorded.</li>
+          <li>The site sends browser security headers, and uses HTTPS with strict transport security when it is served over HTTPS.</li>
+          <li>Read what we collect and why in the <a href="/privacy.html">Privacy Policy</a>.</li>
+        </ul>
+      </article>
+      <article class="scard">
+        <div class="sicon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F2B33D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg></div>
+        <h3>Transaction Verification</h3>
+        <p class="lede">A trade is only paid out after the deposit has been checked.</p>
+        <ul class="checks">
+          <li>Every trade gets its own deposit address, so a deposit can be matched to the right trade.</li>
+          <li>Deposit notices from our crypto provider are signature-checked before we act on them.</li>
+          <li>We wait for the required network confirmations before any naira is sent.</li>
+          <li>Each payout carries a reference unique to its trade, which is how a retry is matched to the original instead of being treated as a new payment.</li>
+        </ul>
+      </article>
+      <article class="scard">
+        <div class="sicon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F2B33D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11l3 3v13H5z"/><path d="M9 11h6M9 15h6"/></svg></div>
+        <h3>Transparent Transactions</h3>
+        <p class="lede">You can see what is happening to every trade.</p>
+        <ul class="checks">
+          <li>The naira amount is shown before you start, and the rate is locked for a short time with a visible countdown.</li>
+          <li>Your trade page shows each stage: waiting for deposit, confirming, paying out, and paid.</li>
+          <li>You get an email when we see your deposit and when you are paid. A receipt shows the rate, fee and bank reference.</li>
+          <li>If a bank transfer fails, the trade is marked as needing attention and our team is alerted. Quote your trade ID to support.</li>
+        </ul>
+      </article>
+    </div>
+    <p class="sec-note"><b>Help us protect you.</b> Use a password you do not use anywhere else, turn on two-factor sign-in, and never share your codes with anyone.</p>
+  </div>
+</section>
+
+<section id="assets" class="band">
   <div class="wrap sec">
     <div class="railhead">
       <div>
@@ -139,7 +224,7 @@
       </div>
       <div class="fcard">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#F2B33D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 01-11.5 7.2L4 20l1-4.5A8 8 0 1121 12z"/></svg>
-        <h3>A person to talk to</h3><p>Stuck on a transfer? Our team is available <span data-cfg="support_hours">[YOUR SUPPORT HOURS]</span>. Contact details are in the Support section below.</p>
+        <h3>A person to talk to</h3><p>Stuck on a transfer? Our team is ready to help<span data-cfg-if="support_hours" hidden> (<span data-cfg="support_hours"></span>)</span>. Contact details are in the Support section below.</p>
       </div>
     </div>
   </div>
@@ -153,7 +238,7 @@
     </div>
     <div class="faq" id="faqList">
       <button type="button" class="q" aria-expanded="true"><span>How long does a payout take?</span><i aria-hidden="true">&minus;</i></button>
-      <p class="a">Your naira is paid to your bank in <span data-cfg="payout_time">[YOUR PAYOUT TIME]</span> after the network confirms your deposit.</p>
+      <p class="a">Your payout starts once the network has confirmed your deposit and we have verified it. <span data-cfg-if="payout_time" hidden>Payout time: <span data-cfg="payout_time"></span>.</span> You can follow each stage on your trade page, and we email you when you are paid.</p>
       <button type="button" class="q" aria-expanded="false"><span>Which networks can I send on?</span><i aria-hidden="true">+</i></button>
       <p class="a" hidden>USDT on TRC-20 or ERC-20, BTC on Bitcoin, ETH on Ethereum and SOL on Solana. The address page shows the network for your trade.</p>
       <button type="button" class="q" aria-expanded="false"><span>What happens if I send on the wrong network?</span><i aria-hidden="true">+</i></button>
@@ -168,10 +253,10 @@
   <div class="wrap sec">
     <span class="eyebrow">Support</span>
     <h2>Talk to a person</h2>
-    <p class="sub">Our team is available <span data-cfg="support_hours">[YOUR SUPPORT HOURS]</span>. Have your trade ID ready. It is shown on every trade page.</p>
+    <p class="sub"><span data-cfg-if="support_hours" hidden>Our team is available <span data-cfg="support_hours"></span>. </span>Have your trade ID ready. It is shown on every trade page.</p>
     <div class="contact-grid">
-      <a class="contact" href="#support" data-cfg-mailto><b>Email</b><span data-cfg="support_email">[YOUR SUPPORT EMAIL]</span></a>
-      <a class="contact" href="#support" data-cfg-wa><b>WhatsApp</b><span data-cfg-wa-text>[YOUR WHATSAPP NUMBER]</span></a>
+      <a class="contact" href="#support" data-cfg-mailto data-cfg-if="support_email" hidden><b>Email</b><span data-cfg="support_email"></span></a>
+      <a class="contact" href="#support" data-cfg-wa data-cfg-if="support_whatsapp" hidden><b>WhatsApp</b><span data-cfg-wa-text></span></a>
     </div>
   </div>
 </section>
@@ -205,11 +290,11 @@
     <div class="foot-top">
       <strong>Kobodesk</strong>
       <nav aria-label="Footer">
-        <a href="#how">How it works</a><a href="#assets">Assets</a><a href="#support">Support</a><a href="/app.html#/login">Log in</a><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a>
+        <a href="#how">How it works</a><a href="#security">Security</a><a href="#assets">Assets</a><a href="#support">Support</a><a href="/app.html#/login">Log in</a><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a>
       </nav>
     </div>
     <p>Crypto prices move quickly. Rates on this page are estimates and can change before you start a trade.</p>
-    <p data-cfg="company_line">[YOUR COMPANY NAME, RC NUMBER AND SEC REGISTRATION DETAILS]</p>
+    <p data-cfg="company_line" data-cfg-if="company_name" hidden></p>
   </div>
 </footer>
 
