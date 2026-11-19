@@ -49,3 +49,10 @@ All accounts and trades are in the file at `/data/kobodesk.db`. Turn on the host
 
 ## New settings
 See `.env.example` for RATES_SOURCE, COMPANY_NAME, RC_NUMBER, SUPPORT_EMAIL, SUPPORT_WHATSAPP, SUPPORT_HOURS, PAYOUT_TIME, ANALYTICS_DOMAIN and STUCK_MINUTES. In live mode the server will not start without the company, support and rates settings. Go through LAUNCH_CHECKLIST.md before taking customers.
+
+## Render: settings that work
+- **Runtime:** Node. **Build command:** leave empty (there is nothing to install; Kobodesk has no dependencies). **Start command:** `node --no-warnings src/index.js`.
+- **Node version:** the repo pins Node 22 in `.node-version`. Render otherwise picks the newest Node, which has not been tested with Kobodesk.
+- **Test deployment:** set `MODE=sandbox` and `PUBLIC_URL` to your onrender.com address. Without a disk, set `DB_PATH=./data/kobodesk.db`; the data is erased on every redeploy.
+- **Real use:** attach a persistent disk (paid plan), mount it at `/var/data`, set `DB_PATH=/var/data/kobodesk.db`, and fill in every setting in `.env.example`.
+- **If it fails to start:** the log now prints "Kobodesk could not start" followed by the reason and the fix. Send that line if you need help.
