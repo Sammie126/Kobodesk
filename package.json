@@ -4,7 +4,7 @@
   "description": "Backend API for Kobodesk, a crypto-to-naira trading service. Zero dependencies; runs on Node 22.5+.",
   "type": "module",
   "private": true,
-  "engines": { "node": ">=22.5" },
+  "engines": { "node": "22.x" },
   "scripts": {
     "start": "node --no-warnings src/index.js",
     "dev": "node --no-warnings --watch src/index.js",
