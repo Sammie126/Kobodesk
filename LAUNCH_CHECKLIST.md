@@ -26,3 +26,13 @@ Kobodesk's code is built, but these items need you before real customers use it.
 ## Before announcing
 - [ ] Run `npm test`. Do a small real trade end to end. Test a failed payout and the Retry button.
 - [ ] Test on a low-end Android phone and an older iPhone.
+
+## Compliance (see COMPLIANCE.md and FUNDS_SEGREGATION.md)
+- [ ] Complete the funds table in FUNDS_SEGREGATION.md and have it signed off before you state anything about segregation.
+- [ ] Appoint a compliance officer, write the AML/CFT policy, and set REVIEW_THRESHOLD_KOBO and the daily limits with them.
+- [ ] Create Cloudflare Turnstile keys and set TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY.
+- [ ] Set SECURITY_EMAIL to a mailbox that is read, and check /.well-known/security.txt after deploying.
+- [ ] Every admin turns on two-factor sign-in in Settings before using the admin page.
+- [ ] Keep DATA_ENCRYPTION_KEY backed up separately from the database. Test restoring a backup.
+- [ ] Have a lawyer set the retention periods and approve Terms and Privacy.
+- [ ] Review the held-trades and flagged-accounts lists every day.

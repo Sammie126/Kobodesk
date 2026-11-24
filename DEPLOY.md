@@ -56,3 +56,11 @@ See `.env.example` for RATES_SOURCE, COMPANY_NAME, RC_NUMBER, SUPPORT_EMAIL, SUP
 - **Test deployment:** set `MODE=sandbox` and `PUBLIC_URL` to your onrender.com address. Without a disk, set `DB_PATH=./data/kobodesk.db`; the data is erased on every redeploy.
 - **Real use:** attach a persistent disk (paid plan), mount it at `/var/data`, set `DB_PATH=/var/data/kobodesk.db`, and fill in every setting in `.env.example`.
 - **If it fails to start:** the log now prints "Kobodesk could not start" followed by the reason and the fix. Send that line if you need help.
+
+## Bot protection (Cloudflare Turnstile)
+1. Sign in at dash.cloudflare.com, open Turnstile, and add a widget for your domain.
+2. Copy the site key into `TURNSTILE_SITE_KEY` and the secret key into `TURNSTILE_SECRET_KEY`.
+3. Redeploy. Sign-up, login, forgot-password and starting a trade now show the check. Outside sandbox mode the server will not start without both keys.
+
+## Encryption key
+`DATA_ENCRYPTION_KEY` protects names, ID numbers, ID files and bank details. Store a copy somewhere safe that is separate from the database. Without it, that data cannot be read. In a test deployment without this key set, a random key is made on every start, so saved bank accounts and identity data become unreadable after a restart: set it even for tests.

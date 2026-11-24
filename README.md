@@ -107,3 +107,7 @@ Setting `MODE` to anything other than `sandbox` makes the server refuse to start
 
 ## Features added for launch
 Identity check (manual review), receipts (print/PDF), referral links, admin page (overview, failed payout retry, KYC review), email alerts for deposits/payouts/stuck trades, legal page drafts, SEO/sharing tags, optional analytics, installable app (PWA). See LAUNCH_CHECKLIST.md and PROVIDERS.md.
+
+
+## Compliance controls
+Identity upload and review, limits, review holds, audit log, CAPTCHA, rate limits, security.txt, encryption at rest and basic AML flags are built in. Read COMPLIANCE.md for what each does and what still needs a lawyer or compliance officer, and FUNDS_SEGREGATION.md before you say anything about how customer funds are held.
