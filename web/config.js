@@ -14,18 +14,19 @@
       var value = key === 'company_line' ? line : c[key];
       if (value) el.textContent = value;
     });
-    if (c.support_email) {
-      each('[data-cfg-mailto]', function (el) { el.setAttribute('href', 'mailto:' + c.support_email); });
-    }
-    var configured = !!c.company_name;
+    each('[data-cfg-mailto]', function (el) {
+      var addr = c[el.getAttribute('data-cfg-mailto') || 'support_email'];
+      if (addr) el.setAttribute('href', 'mailto:' + addr);
+    });
     each('[data-cfg-wa]', function (el) {
-      if (c.support_whatsapp) {
-        el.setAttribute('href', 'https://wa.me/' + c.support_whatsapp);
-        var label = el.querySelector('[data-cfg-wa-text]');
-        if (label) label.textContent = '+' + c.support_whatsapp;
-      } else if (configured) {
-        el.hidden = true; // set up, but no WhatsApp number: hide the tile instead of showing a placeholder
-      }
+      if (!c.support_whatsapp) return;
+      el.setAttribute('href', 'https://wa.me/' + c.support_whatsapp);
+      var label = el.querySelector('[data-cfg-wa-text]');
+      if (label) label.textContent = '+' + c.support_whatsapp;
+    });
+    // Optional details stay hidden until the owner has set a real value.
+    each('[data-cfg-if]', function (el) {
+      if (c[el.getAttribute('data-cfg-if')]) el.hidden = false;
     });
   }).catch(function () { /* placeholders stay */ });
 

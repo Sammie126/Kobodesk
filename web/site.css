@@ -300,3 +300,14 @@ h1:focus{outline:none}
 @media (min-width:900px){
   .how.card,.rail .card.how{padding:28px}
 }
+
+/* ---------- Compliance screens ---------- */
+.captcha{margin:8px 0 14px;min-height:0}
+.app-foot{padding-top:24px;padding-bottom:40px;color:var(--muted);font-size:14px;line-height:1.5}
+.app-foot p{margin-bottom:8px}
+.app-foot a{color:var(--green);font-weight:700}
+.idimg{display:block;max-width:100%;height:auto;border-radius:12px;border:1px solid var(--line);margin:8px 0 14px}
+.logrow{border-top:1px solid var(--line);padding:10px 0}
+.logrow b{text-transform:capitalize}
+.logdetail{word-break:break-all;color:var(--sub);margin-top:2px}
+.field select,.field input[type=file]{display:block;width:100%;font-size:16px}
