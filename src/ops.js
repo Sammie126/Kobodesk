@@ -24,6 +24,14 @@ export function makeNotifier({ db, config, mailer }) {
       } else if (kind === 'paid_out') {
         await send(u.email, `Paid: ₦${formatNaira(t.payout_kobo)} is on its way`,
           `Your ${label} trade (ID ${t.id}) is complete. ₦${formatNaira(t.payout_kobo)} was sent to your bank account. Open the app and go to My trades to see your receipt.${sign}`);
+      } else if (kind === 'held') {
+        await send(u.email, `Your ${t.coin} trade is being reviewed`,
+          `Your deposit for the ${label} trade (ID ${t.id}) is confirmed. Before we pay out, our team needs to complete a routine review of this trade. You do not need to send anything again. We will email you as soon as it is done.${sign}`);
+        await toAdmins(`Trade held for review: ${t.id}`,
+          `Trade ${t.id} (${label}) for ${u.email} is waiting for a decision.\nReason: ${t.hold_reason ?? 'not recorded'}\nOpen the admin page to release or reject it.`);
+      } else if (kind === 'review_rejected') {
+        await send(u.email, `We could not complete your ${t.coin} trade`,
+          `After review, we could not complete the ${label} trade (ID ${t.id}). Please contact support and quote the trade ID so we can help with your deposit.${sign}`);
       } else if (kind === 'payout_failed') {
         await send(u.email, `Action needed on your ${t.coin} trade`,
           `Your deposit for the ${label} trade (ID ${t.id}) arrived, but the bank transfer did not go through. Our team is looking into it. You do not need to send anything again.${sign}`);
@@ -48,7 +56,7 @@ export function makeNotifier({ db, config, mailer }) {
 // Emails your admins about trades that need a person. Each trade and state is reported once.
 export async function alertStuck({ db, config, notifier }, now = Date.now()) {
   if (!config.adminEmails.length) return 0;
-  const rules = [['payout_failed', 0], ['paying_out', config.stuckMinutes * 60000], ['confirming', 120 * 60000]];
+  const rules = [['payout_failed', 0], ['held_for_review', 4 * 3600000], ['paying_out', config.stuckMinutes * 60000], ['confirming', 120 * 60000]];
   const found = [];
   for (const [status, age] of rules) {
     for (const t of db.prepare('SELECT * FROM trades WHERE status = ? AND updated_at < ?').all(status, now - age)) {

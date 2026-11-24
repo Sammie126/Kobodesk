@@ -17,10 +17,21 @@ import { makeNotifier, alertStuck } from './ops.js';
 import { logEvent } from './db.js';
 import { formatNaira, formatAmount, SCALE } from './money.js';
 import {
-  HttpError, tradeView, createTrade, priceTrade, applyDeposit, retryPayout, expireStaleTrades,
+  HttpError, tradeView, adminTradeView, createTrade, priceTrade, applyDeposit, retryPayout, reviewTrade, expireStaleTrades,
 } from './trades.js';
+import { seal, open, blindIndex, sealBytes, openBytes, last4, bankView, migrateEncryption } from './vault.js';
+import { limitsFor, usedToday, flagUser, clearFlag } from './compliance.js';
+import { verifyCaptcha } from './captcha.js';
 
 const MAX_BODY = 100 * 1024;
+const MAX_UPLOAD_BODY = 6 * 1024 * 1024; // an ID photo sent as base64 text
+const MAX_ID_FILE = 3 * 1024 * 1024;
+const sniffMime = (b) => {
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (b.length >= 5 && b.subarray(0, 5).toString('latin1') === '%PDF-') return 'application/pdf';
+  return null;
+};
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 const WEB_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
 const TYPES = {
@@ -28,18 +39,20 @@ const TYPES = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
 };
-const buildCsp = (analyticsDomain) => [
+const buildCsp = (analyticsDomain, captcha) => [
   "default-src 'self'",
-  `script-src 'self'${analyticsDomain ? ' https://plausible.io' : ''}`,
+  `script-src 'self'${analyticsDomain ? ' https://plausible.io' : ''}${captcha ? ' https://challenges.cloudflare.com' : ''}`,
   "style-src 'self' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com", "img-src 'self' data:",
   `connect-src 'self'${analyticsDomain ? ' https://plausible.io' : ''}`,
+  captcha ? "frame-src https://challenges.cloudflare.com" : "frame-src 'none'",
   "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'",
 ].join('; ');
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 export function createApp(config, opts = {}) {
   const db = opts.db ?? openDb(config.dbPath);
+  migrateEncryption(db, config.dataKey);
   const providers = opts.providers ?? createProviders(config);
   const mailer = opts.mailer ?? createMailer(config);
   const notifier = makeNotifier({ db, config, mailer });
@@ -57,6 +70,16 @@ export function createApp(config, opts = {}) {
     hits.set(key, list);
     return list.length > limit;
   };
+  const prune = () => {
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    for (const [k, list] of hits) if (!list.length || list[list.length - 1] < cutoff) hits.delete(k);
+  };
+  const requireCaptcha = async (body, ip) => {
+    if (!config.turnstileSecret) return;
+    if (!(await verifyCaptcha(config, body.captcha_token, ip, opts.fetch))) {
+      throw new HttpError(400, 'Please complete the "I am human" check below the form and try again.', 'captcha_failed');
+    }
+  };
   const guard = (...keys) => {
     if (keys.some((k) => limited(k))) throw new HttpError(429, 'Too many attempts. Try again in a few minutes.', 'rate_limited');
   };
@@ -66,6 +89,8 @@ export function createApp(config, opts = {}) {
     id: u.id, email: u.email, kyc_status: u.kyc_status,
     email_verified: !!u.email_verified, totp_enabled: !!u.totp_enabled,
     is_admin: config.adminEmails.includes(u.email),
+    admin_needs_2fa: config.adminEmails.includes(u.email) && config.adminRequire2fa && !u.totp_enabled,
+    paused: !!u.flagged_at, // trades are paused for a safety check; the reason is never shown to customers
   });
   const newRefCode = () => crypto.randomBytes(5).toString('hex').toUpperCase();
   const tokenFor = (u) => signToken({ sub: u.id, v: u.token_version }, config.tokenSecret, config.tokenTtlSeconds);
@@ -151,6 +176,7 @@ export function createApp(config, opts = {}) {
   // ---------- Auth ----------
   route('POST', '/api/auth/signup', async ({ body, ip }) => {
     guard(`ip:${ip}`);
+    await requireCaptcha(body, ip);
     const email = String(body.email ?? '').trim().toLowerCase();
     if (!EMAIL_RE.test(email)) throw new HttpError(400, 'Enter a valid email address.', 'bad_email');
     checkPassword(body.password);
@@ -170,6 +196,7 @@ export function createApp(config, opts = {}) {
   route('POST', '/api/auth/login', async ({ body, ip }) => {
     const email = String(body.email ?? '').trim().toLowerCase();
     guard(`ip:${ip}`, `email:${email}`);
+    await requireCaptcha(body, ip);
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
     // Same message for unknown email and wrong password.
     if (!user || !verifyPassword(String(body.password ?? ''), user.password_hash)) {
@@ -212,6 +239,7 @@ export function createApp(config, opts = {}) {
   route('POST', '/api/auth/forgot-password', async ({ body, ip }) => {
     const email = String(body.email ?? '').trim().toLowerCase();
     guard(`ip:${ip}`, `email:${email}`);
+    await requireCaptcha(body, ip);
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
     if (user) {
       const { token, hash } = newEmailToken();
@@ -297,7 +325,10 @@ export function createApp(config, opts = {}) {
   }, { auth: true });
 
   route('GET', '/api/bank-accounts', ({ user }) => ({
-    body: db.prepare('SELECT id, bank_code, bank_name, account_number, account_name FROM bank_accounts WHERE user_id = ? ORDER BY created_at').all(user.id),
+    body: db.prepare('SELECT * FROM bank_accounts WHERE user_id = ? ORDER BY created_at').all(user.id).map((r) => {
+      const b = bankView(r, config.dataKey);
+      return { id: b.id, bank_code: b.bank_code, bank_name: b.bank_name, account_number: b.account_number ?? `******${r.account_last4 ?? ''}`, account_name: b.account_name ?? 'Unavailable' };
+    }),
   }), { auth: true });
 
   route('POST', '/api/bank-accounts', async ({ user, body }) => {
@@ -309,16 +340,29 @@ export function createApp(config, opts = {}) {
     const resolved = await providers.payout.resolveAccount({ bank_code, account_number });
     if (!resolved) throw new HttpError(422, 'We could not find that account. Check the number and bank.', 'account_not_found');
     const id = newId('bnk');
-    try {
-      db.prepare('INSERT INTO bank_accounts (id, user_id, bank_code, bank_name, account_number, account_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(id, user.id, bank_code, bank.name, account_number, resolved.account_name, Date.now());
-    } catch {
+    // The number and name are stored encrypted. The fingerprint lets us spot the same account on other customers.
+    const hash = blindIndex(`${bank_code}:${account_number}`, config.dataKey);
+    if (db.prepare('SELECT 1 FROM bank_accounts WHERE user_id = ? AND account_hash = ?').get(user.id, hash)) {
       throw new HttpError(409, 'You already saved this account.', 'duplicate_account');
     }
-    return { status: 201, body: { id, bank_code, bank_name: bank.name, account_number, account_name: resolved.account_name } };
+    db.prepare('INSERT INTO bank_accounts (id, user_id, bank_code, bank_name, account_number, account_name, account_hash, account_last4, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, user.id, bank_code, bank.name, seal(account_number, config.dataKey), seal(resolved.account_name, config.dataKey), hash, last4(account_number), Date.now());
+    // The same bank account on more than one customer account is a basic AML warning sign.
+    const others = db.prepare('SELECT DISTINCT user_id FROM bank_accounts WHERE account_hash = ? AND user_id != ?').all(hash, user.id);
+    let paused = false;
+    if (others.length) {
+      logEvent(db, null, 'shared_bank_account', { users: [user.id, ...others.map((o) => o.user_id)], bank_code, account_last4: last4(account_number) });
+      paused = flagUser(ctxBase, user.id, 'Saved a bank account that is also saved on another customer account.') || !!user.flagged_at;
+      for (const o of others) flagUser(ctxBase, o.user_id, 'A bank account on this account was also saved by another customer.');
+    }
+    return { status: 201, body: { id, bank_code, bank_name: bank.name, account_number, account_name: resolved.account_name, paused } };
   }, { auth: true });
 
-  route('POST', '/api/trades', async ({ user, body }) => {
+  route('POST', '/api/trades', async ({ user, body, ip }) => {
+    if (limited(`trade:${user.id}`, config.tradeCreatesPerHour, 60 * 60 * 1000) || limited(`tradeip:${ip}`, config.tradeCreatesPerHour * 3, 60 * 60 * 1000)) {
+      throw new HttpError(429, 'You are creating trades too quickly. Wait a while and try again.', 'rate_limited');
+    }
+    await requireCaptcha(body, ip);
     const trade = await createTrade({ ...ctxBase, user, input: body });
     return { status: 201, body: tradeView(trade) };
   }, { auth: true });
@@ -340,15 +384,39 @@ export function createApp(config, opts = {}) {
       company_name: config.companyName, rc_number: config.rcNumber, sec_registration: config.secRegistration,
       support_email: config.supportEmail, support_whatsapp: config.supportWhatsapp,
       support_hours: config.supportHours, payout_time: config.payoutTime,
+      security_email: config.securityEmail,
+      kyc_required: config.kycBeforeFirstTrade,
+      captcha_site_key: config.turnstileSiteKey,
     },
   }));
+
+  route('GET', '/api/limits', ({ user }) => {
+    const { perTrade, daily } = limitsFor(config, user);
+    const used = usedToday(db, user.id);
+    return { body: { kyc_status: user.kyc_status, per_trade_naira: formatNaira(perTrade), daily_naira: formatNaira(daily), used_today_naira: formatNaira(used), remaining_today_naira: formatNaira(Math.max(0, daily - used)) } };
+  }, { auth: true });
+
+  // ---------- Data deletion requests (Nigeria Data Protection Act) ----------
+  route('POST', '/api/account/deletion-request', async ({ user }) => {
+    const open_ = db.prepare("SELECT id FROM deletion_requests WHERE user_id = ? AND status = 'open'").get(user.id);
+    if (!open_) {
+      const id = newId('del');
+      db.prepare('INSERT INTO deletion_requests (id, user_id, requested_at) VALUES (?, ?, ?)').run(id, user.id, Date.now());
+      logEvent(db, null, 'deletion_requested', { user: user.id, request: id });
+      await notifier.toAdmins('Data deletion request', `${user.email} asked us to delete their data. Open the admin page to review it. Records we must keep by law are not deleted.`);
+      await notifier.send(user.email, 'We received your deletion request',
+        `We received your request to delete your Kobodesk account data. We will review it and write to you${config.supportEmail ? ` from ${config.supportEmail}` : ''}. Some records, such as trade and identity records, may need to be kept for a period required by law. We will tell you what we kept and why.`);
+    }
+    return { body: { ok: true, message: 'We received your request. We will email you.' } };
+  }, { auth: true });
 
   // ---------- Receipts ----------
   route('GET', '/api/trades/:id/receipt', ({ user, params }) => {
     const t = db.prepare('SELECT * FROM trades WHERE id = ? AND user_id = ?').get(params.id, user.id);
     if (!t) throw new HttpError(404, 'Trade not found.', 'not_found');
     if (t.status !== 'paid_out') throw new HttpError(409, 'A receipt is available once the trade is paid.', 'not_paid');
-    const bank = db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(t.bank_account_id);
+    const row = db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(t.bank_account_id);
+    const bank = bankView(row, config.dataKey);
     const received = t.received_scaled ?? t.amount_scaled;
     const effectiveRate = Number(((BigInt(t.payout_kobo) + BigInt(t.fee_kobo)) * SCALE) / BigInt(received)); // kobo per coin actually paid
     return {
@@ -357,7 +425,7 @@ export function createApp(config, opts = {}) {
         date: new Date(t.updated_at).toISOString(), customer_email: user.email,
         coin: t.coin, network: t.network, amount: formatAmount(received),
         rate_naira: formatNaira(effectiveRate), fee_naira: formatNaira(t.fee_kobo), payout_naira: formatNaira(t.payout_kobo),
-        bank_name: bank.bank_name, account_name: bank.account_name, account_last4: bank.account_number.slice(-4),
+        bank_name: bank.bank_name, account_name: bank.account_name ?? 'Unavailable', account_last4: row.account_last4 ?? '',
         payout_ref: t.payout_ref, company_name: config.companyName, rc_number: config.rcNumber,
       },
     };
@@ -376,12 +444,17 @@ export function createApp(config, opts = {}) {
   }, { auth: true });
 
   // ---------- Identity verification (KYC) ----------
-  route('GET', '/api/kyc', ({ user }) => ({
-    body: {
-      status: user.kyc_status,
-      submission: db.prepare('SELECT full_name, id_type, id_last4, status, note, submitted_at FROM kyc_submissions WHERE user_id = ?').get(user.id) ?? null,
-    },
-  }), { auth: true });
+  route('GET', '/api/kyc', ({ user }) => {
+    const sub = db.prepare('SELECT full_name, id_type, id_last4, status, note, submitted_at FROM kyc_submissions WHERE user_id = ?').get(user.id);
+    return {
+      body: {
+        status: user.kyc_status,
+        submission: sub ? { ...sub, full_name: open(sub.full_name, config.dataKey) } : null,
+        has_document: !!db.prepare('SELECT 1 FROM kyc_documents WHERE user_id = ?').get(user.id),
+        document_required: config.kycRequireDocument,
+      },
+    };
+  }, { auth: true });
 
   route('POST', '/api/kyc', async ({ user, body }) => {
     if (!user.email_verified) throw new HttpError(403, 'Confirm your email before you verify your identity.', 'verify_email');
@@ -406,17 +479,35 @@ export function createApp(config, opts = {}) {
     const address = String(body.address ?? '').trim().replace(/\s+/g, ' ');
     if (address.length < 10 || address.length > 250) throw new HttpError(400, 'Enter your full home address.', 'bad_address');
 
-    // The ID number is stored encrypted. Only the last 4 digits are kept readable.
+    // The government ID photo or PDF. We check the file's real type from its first bytes, not its name.
+    let doc = null;
+    const rawDoc = body.id_document && typeof body.id_document === 'object' ? String(body.id_document.data ?? '') : '';
+    if (rawDoc) {
+      if (rawDoc.length > MAX_ID_FILE * 1.4 || !/^[A-Za-z0-9+/=\s]+$/.test(rawDoc)) throw new HttpError(400, 'The ID file is too large or damaged. Use a photo or PDF under 3 MB.', 'bad_document');
+      const bytes = Buffer.from(rawDoc, 'base64');
+      const mime = sniffMime(bytes);
+      if (!mime || bytes.length > MAX_ID_FILE || bytes.length < 16) throw new HttpError(400, 'Upload your ID as a JPEG or PNG photo, or a PDF, under 3 MB.', 'bad_document');
+      doc = { bytes, mime };
+    } else if (config.kycRequireDocument) {
+      throw new HttpError(400, 'Upload a photo or PDF of your government-issued ID.', 'document_required');
+    }
+
+    // Everything personal is stored encrypted. Only the last 4 digits of the ID number stay readable.
     tx(db, () => {
       db.prepare(`INSERT OR REPLACE INTO kyc_submissions
         (user_id, full_name, dob, id_type, id_number_enc, id_last4, address, status, note, submitted_at, reviewed_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, NULL)`)
-        .run(user.id, fullName, dob, idType, encryptSecret(idNumber, config.dataKey), idNumber.slice(-4), address, Date.now());
+        .run(user.id, seal(fullName, config.dataKey), seal(dob, config.dataKey), idType, encryptSecret(idNumber, config.dataKey), idNumber.slice(-4), seal(address, config.dataKey), Date.now());
+      if (doc) {
+        db.prepare('INSERT OR REPLACE INTO kyc_documents (user_id, mime, size, data_enc, created_at) VALUES (?, ?, ?, ?, ?)')
+          .run(user.id, doc.mime, doc.bytes.length, sealBytes(doc.bytes, config.dataKey), Date.now());
+      }
       db.prepare("UPDATE users SET kyc_status = 'pending' WHERE id = ?").run(user.id);
+      logEvent(db, null, 'kyc_submitted', { user: user.id, id_type: idType, document: !!doc });
     });
     await notifier.toAdmins('Identity check waiting for review', `${user.email} submitted their details. Open the admin page to review them.`);
     return { body: { status: 'pending' } };
-  }, { auth: true });
+  }, { auth: true, maxBody: MAX_UPLOAD_BODY });
 
   // ---------- Crypto provider webhook ----------
   route('POST', '/api/webhooks/crypto', async ({ body, raw, req }) => {
@@ -443,37 +534,54 @@ export function createApp(config, opts = {}) {
   }
 
   // ---------- Admin ----------
+  const emailOf = (userId) => db.prepare('SELECT email FROM users WHERE id = ?').get(userId)?.email;
+  const parseDetail = (d) => { try { return d == null ? null : JSON.parse(d); } catch { return d; } };
+
   route('GET', '/api/admin/trades', ({ query }) => {
     const status = query.get('status');
     const rows = status
       ? db.prepare('SELECT * FROM trades WHERE status = ? ORDER BY created_at DESC LIMIT 200').all(status)
       : db.prepare('SELECT * FROM trades ORDER BY created_at DESC LIMIT 200').all();
-    return { body: rows.map(tradeView) };
+    return { body: rows.map((t) => adminTradeView(t, emailOf(t.user_id))) };
   }, { auth: true, admin: true });
 
-  route('POST', '/api/admin/trades/:id/retry-payout', async ({ params }) => ({
-    body: await retryPayout(ctxBase, params.id),
+  route('POST', '/api/admin/trades/:id/retry-payout', async ({ params, user }) => ({
+    body: await retryPayout(ctxBase, params.id, user.email),
   }), { auth: true, admin: true });
 
-  route('POST', '/api/admin/users/:id/kyc', ({ params, body }) => {
+  // Release or reject a trade that is held for review. You cannot decide on your own trades.
+  route('POST', '/api/admin/trades/:id/review', async ({ params, body, user }) => {
+    const t = db.prepare('SELECT user_id FROM trades WHERE id = ?').get(params.id);
+    if (!t) throw new HttpError(404, 'Trade not found.', 'not_found');
+    if (t.user_id === user.id) throw new HttpError(403, 'Another team member must review your own trades.', 'self_review');
+    return { body: await reviewTrade(ctxBase, params.id, String(body.decision ?? ''), body.note, user.email) };
+  }, { auth: true, admin: true });
+
+  route('POST', '/api/admin/users/:id/kyc', ({ params, body, user }) => {
     const status = String(body.status ?? '');
     if (!['unverified', 'pending', 'verified', 'rejected'].includes(status)) {
       throw new HttpError(400, 'Unknown status.', 'bad_status');
     }
+    if (params.id === user.id) throw new HttpError(403, 'Another team member must change your own status.', 'self_review');
     const r = db.prepare('UPDATE users SET kyc_status = ? WHERE id = ?').run(status, params.id);
     if (r.changes !== 1) throw new HttpError(404, 'User not found.', 'not_found');
+    logEvent(db, null, 'kyc_status_set', { admin: user.email, user: params.id, status });
     return { body: { id: params.id, kyc_status: status } };
   }, { auth: true, admin: true });
 
   route('GET', '/api/admin/overview', () => {
     const by = Object.fromEntries(db.prepare('SELECT status, COUNT(*) n FROM trades GROUP BY status').all().map((r) => [r.status, r.n]));
+    const paid = db.prepare("SELECT COALESCE(SUM(payout_kobo), 0) s FROM trades WHERE status = 'paid_out'").get().s;
     return {
       body: {
         trades_by_status: by,
         users: db.prepare('SELECT COUNT(*) n FROM users').get().n,
         pending_kyc: db.prepare("SELECT COUNT(*) n FROM kyc_submissions WHERE status = 'pending'").get().n,
-        paid_out_kobo: db.prepare("SELECT COALESCE(SUM(payout_kobo), 0) s FROM trades WHERE status = 'paid_out'").get().s,
-        paid_out_naira: formatNaira(db.prepare("SELECT COALESCE(SUM(payout_kobo), 0) s FROM trades WHERE status = 'paid_out'").get().s),
+        held_trades: by.held_for_review ?? 0,
+        flagged_users: db.prepare('SELECT COUNT(*) n FROM users WHERE flagged_at IS NOT NULL').get().n,
+        open_deletion_requests: db.prepare("SELECT COUNT(*) n FROM deletion_requests WHERE status = 'open'").get().n,
+        paid_out_kobo: paid,
+        paid_out_naira: formatNaira(paid),
       },
     };
   }, { auth: true, admin: true });
@@ -481,22 +589,32 @@ export function createApp(config, opts = {}) {
   route('GET', '/api/admin/kyc', ({ query }) => {
     const status = query.get('status') || 'pending';
     return {
-      body: db.prepare(`SELECT k.user_id, u.email, k.full_name, k.id_type, k.id_last4, k.status, k.submitted_at
-        FROM kyc_submissions k JOIN users u ON u.id = k.user_id WHERE k.status = ? ORDER BY k.submitted_at LIMIT 200`).all(status),
+      body: db.prepare(`SELECT k.user_id, u.email, k.full_name, k.id_type, k.id_last4, k.status, k.submitted_at,
+          EXISTS (SELECT 1 FROM kyc_documents d WHERE d.user_id = k.user_id) AS has_document
+        FROM kyc_submissions k JOIN users u ON u.id = k.user_id WHERE k.status = ? ORDER BY k.submitted_at LIMIT 200`).all(status)
+        .map((r) => ({ ...r, full_name: open(r.full_name, config.dataKey), has_document: !!r.has_document })),
     };
   }, { auth: true, admin: true });
 
-  // Opening the full details is recorded, because they hold a government ID number.
+  // Opening the full details or the ID file is recorded, because they hold a government ID number.
   route('GET', '/api/admin/kyc/:id', ({ params, user }) => {
     const k = db.prepare('SELECT k.*, u.email FROM kyc_submissions k JOIN users u ON u.id = k.user_id WHERE k.user_id = ?').get(params.id);
     if (!k) throw new HttpError(404, 'No submission found.', 'not_found');
     logEvent(db, null, 'kyc_viewed', { admin: user.email, user: params.id });
     return {
       body: {
-        user_id: k.user_id, email: k.email, full_name: k.full_name, dob: k.dob, id_type: k.id_type,
-        id_number: decryptSecret(k.id_number_enc, config.dataKey), address: k.address, status: k.status, submitted_at: k.submitted_at,
+        user_id: k.user_id, email: k.email, full_name: open(k.full_name, config.dataKey), dob: open(k.dob, config.dataKey), id_type: k.id_type,
+        id_number: decryptSecret(k.id_number_enc, config.dataKey), address: open(k.address, config.dataKey), status: k.status, submitted_at: k.submitted_at,
+        has_document: !!db.prepare('SELECT 1 FROM kyc_documents WHERE user_id = ?').get(params.id),
       },
     };
+  }, { auth: true, admin: true });
+
+  route('GET', '/api/admin/kyc/:id/document', ({ params, user }) => {
+    const d = db.prepare('SELECT * FROM kyc_documents WHERE user_id = ?').get(params.id);
+    if (!d) throw new HttpError(404, 'No ID file was uploaded.', 'not_found');
+    logEvent(db, null, 'kyc_document_viewed', { admin: user.email, user: params.id });
+    return { body: { mime: d.mime, size: d.size, data: openBytes(d.data_enc, config.dataKey).toString('base64') } };
   }, { auth: true, admin: true });
 
   route('POST', '/api/admin/kyc/:id/decision', async ({ params, body, user }) => {
@@ -504,6 +622,7 @@ export function createApp(config, opts = {}) {
     const note = String(body.note ?? '').trim().slice(0, 300);
     if (!['verified', 'rejected'].includes(status)) throw new HttpError(400, 'Choose verified or rejected.', 'bad_status');
     if (status === 'rejected' && !note) throw new HttpError(400, 'Give the customer a reason.', 'note_required');
+    if (params.id === user.id) throw new HttpError(403, 'Another team member must review your own identity check.', 'self_review');
     const k = db.prepare('SELECT * FROM kyc_submissions WHERE user_id = ?').get(params.id);
     if (!k) throw new HttpError(404, 'No submission found.', 'not_found');
     tx(db, () => {
@@ -515,20 +634,58 @@ export function createApp(config, opts = {}) {
     return { body: { user_id: params.id, status } };
   }, { auth: true, admin: true });
 
+  // Accounts paused by the anti-money-laundering rules.
+  route('GET', '/api/admin/flags', () => ({
+    body: db.prepare('SELECT id, email, flagged_at, flag_reason FROM users WHERE flagged_at IS NOT NULL ORDER BY flagged_at').all(),
+  }), { auth: true, admin: true });
+
+  route('POST', '/api/admin/users/:id/flag', ({ params, body, user }) => {
+    if (String(body.action ?? '') !== 'clear') throw new HttpError(400, 'Only clear is supported.', 'bad_action');
+    if (params.id === user.id) throw new HttpError(403, 'Another team member must clear your own flag.', 'self_review');
+    const note = String(body.note ?? '').trim().slice(0, 300);
+    if (!note) throw new HttpError(400, 'Write why you are clearing this flag.', 'note_required');
+    if (!clearFlag(ctxBase, params.id, user.email, note)) throw new HttpError(404, 'That account is not flagged.', 'not_flagged');
+    return { body: { ok: true } };
+  }, { auth: true, admin: true });
+
+  // The audit log. Newest first. Filter by trade ID to see one trade from start to finish.
+  route('GET', '/api/admin/audit', ({ query }) => {
+    const limit = Math.min(Math.max(Number.parseInt(query.get('limit') ?? '100', 10) || 100, 1), 500);
+    const tradeId = query.get('trade_id');
+    const rows = tradeId
+      ? db.prepare('SELECT * FROM events WHERE trade_id = ? ORDER BY id DESC LIMIT ?').all(tradeId, limit)
+      : db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT ?').all(limit);
+    return { body: rows.map((e) => ({ id: e.id, trade_id: e.trade_id, type: e.type, detail: parseDetail(e.detail), at: new Date(e.created_at).toISOString() })) };
+  }, { auth: true, admin: true });
+
+  route('GET', '/api/admin/deletion-requests', () => ({
+    body: db.prepare("SELECT r.id, r.user_id, u.email, r.status, r.requested_at FROM deletion_requests r JOIN users u ON u.id = r.user_id WHERE r.status = 'open' ORDER BY r.requested_at").all(),
+  }), { auth: true, admin: true });
+
+  route('POST', '/api/admin/deletion-requests/:id/close', ({ params, body, user }) => {
+    const note = String(body.note ?? '').trim().slice(0, 500);
+    if (!note) throw new HttpError(400, 'Record what you deleted and what you kept, and why.', 'note_required');
+    const r = db.prepare("UPDATE deletion_requests SET status = 'closed', closed_at = ?, note = ? WHERE id = ? AND status = 'open'").run(Date.now(), note, params.id);
+    if (r.changes !== 1) throw new HttpError(404, 'Request not found.', 'not_found');
+    logEvent(db, null, 'deletion_closed', { admin: user.email, request: params.id, note });
+    return { body: { ok: true } };
+  }, { auth: true, admin: true });
+
   // For a customer who lost their phone. Confirm who they are first.
-  route('POST', '/api/admin/users/:id/reset-2fa', ({ params }) => {
+  route('POST', '/api/admin/users/:id/reset-2fa', ({ params, user }) => {
     const r = db.prepare('UPDATE users SET totp_enabled = 0, totp_secret = NULL, token_version = token_version + 1 WHERE id = ?').run(params.id);
     if (r.changes !== 1) throw new HttpError(404, 'User not found.', 'not_found');
+    logEvent(db, null, 'twofa_reset', { admin: user.email, user: params.id });
     return { body: { ok: true } };
   }, { auth: true, admin: true });
 
   // ---------- HTTP plumbing ----------
-  async function readBody(req) {
+  async function readBody(req, max = MAX_BODY) {
     const chunks = [];
     let size = 0;
     for await (const chunk of req) {
       size += chunk.length;
-      if (size > MAX_BODY) throw new HttpError(413, 'Request too large.', 'too_large');
+      if (size > max) throw new HttpError(413, 'Request too large.', 'too_large');
       chunks.push(chunk);
     }
     return Buffer.concat(chunks).toString('utf8');
@@ -548,11 +705,19 @@ export function createApp(config, opts = {}) {
   };
 
   async function serveStatic(req, res, pathname) {
+    // security.txt (RFC 9116): where researchers send security reports.
+    if (pathname === '/.well-known/security.txt' || pathname === '/security.txt') {
+      if (!config.securityEmail) throw new HttpError(404, 'Not found.', 'not_found');
+      const expires = new Date(Date.now() + 300 * 24 * 3600 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+      const text = `Contact: mailto:${config.securityEmail}\nExpires: ${expires}\nPreferred-Languages: en\nCanonical: ${config.publicUrl}/.well-known/security.txt\nPolicy: ${config.publicUrl}/security.html\n`;
+      res.writeHead(200, { ...baseHeaders(), 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=3600' });
+      return res.end(req.method === 'HEAD' ? undefined : text);
+    }
     if (pathname === '/robots.txt' || pathname === '/sitemap.xml') {
       const isRobots = pathname === '/robots.txt';
       const text = isRobots
         ? `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /app.html\nSitemap: ${config.publicUrl}/sitemap.xml\n`
-        : `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${['/', '/terms.html', '/privacy.html'].map((p) => `  <url><loc>${config.publicUrl}${p}</loc></url>`).join('\n')}\n</urlset>\n`;
+        : `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${['/', '/terms.html', '/privacy.html', '/security.html'].map((p) => `  <url><loc>${config.publicUrl}${p}</loc></url>`).join('\n')}\n</urlset>\n`;
       res.writeHead(200, { ...baseHeaders(), 'content-type': isRobots ? 'text/plain; charset=utf-8' : 'application/xml; charset=utf-8', 'cache-control': 'public, max-age=3600' });
       return res.end(req.method === 'HEAD' ? undefined : text);
     }
@@ -568,7 +733,7 @@ export function createApp(config, opts = {}) {
     const isHtml = type.startsWith('text/html');
     const headers = { ...baseHeaders(), 'content-type': type, 'cache-control': isHtml || rel === '/sw.js' ? 'no-cache' : 'public, max-age=3600' };
     if (isHtml) {
-      headers['content-security-policy'] = buildCsp(config.analyticsDomain);
+      headers['content-security-policy'] = buildCsp(config.analyticsDomain, !!config.turnstileSiteKey);
       const analytics = config.analyticsDomain
         ? `<script defer data-domain="${escapeHtml(config.analyticsDomain)}" src="https://plausible.io/js/script.js"></script>` : '';
       data = Buffer.from(data.toString('utf8').replaceAll('%PUBLIC_URL%', escapeHtml(config.publicUrl)).replace('<!--ANALYTICS-->', analytics), 'utf8');
@@ -591,6 +756,10 @@ export function createApp(config, opts = {}) {
         return await serveStatic(req, res, url.pathname);
       }
 
+      // One shared limit per IP for every API call, on top of the tighter limits on login and trades.
+      if (limited(`api:${clientIp(req)}`, config.apiPerMinute, 60 * 1000)) {
+        throw new HttpError(429, 'Too many requests. Slow down and try again shortly.', 'rate_limited');
+      }
       const match = routes.find((r) => r.method === req.method && r.re.test(url.pathname));
       if (!match) throw new HttpError(404, 'Not found.', 'not_found');
       const params = url.pathname.match(match.re).groups ?? {};
@@ -602,11 +771,14 @@ export function createApp(config, opts = {}) {
         user = payload && db.prepare('SELECT * FROM users WHERE id = ?').get(payload.sub);
         if (!user || payload.v !== user.token_version) throw new HttpError(401, 'Sign in to continue.', 'unauthorized');
         if (match.admin && !config.adminEmails.includes(user.email)) throw new HttpError(403, 'Not allowed.', 'forbidden');
+        if (match.admin && config.adminRequire2fa && !user.totp_enabled) {
+          throw new HttpError(403, 'Turn on two-factor sign-in in Settings before you use the admin page.', 'admin_2fa_required');
+        }
       }
 
       let body = {}, raw = '';
       if (req.method === 'POST') {
-        raw = await readBody(req);
+        raw = await readBody(req, match.maxBody);
         if (raw) {
           try { body = JSON.parse(raw); } catch { throw new HttpError(400, 'Body must be valid JSON.', 'bad_json'); }
           if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Body must be a JSON object.', 'bad_json');
@@ -630,6 +802,7 @@ export function createApp(config, opts = {}) {
   let tick = 0;
   const sweeper = setInterval(() => {
     expireStaleTrades(db);
+    prune();
     if (++tick % 5 === 0) alertStuck(ctxBase).catch((err) => console.error('Stuck-trade check failed:', err.message));
   }, 60 * 1000);
   sweeper.unref();

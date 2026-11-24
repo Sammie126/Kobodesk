@@ -54,9 +54,26 @@ export function loadConfig(overrides = {}) {
     maxTradeKoboVerified: int(env.MAX_TRADE_KOBO_VERIFIED, 5000000000),
     tokenTtlSeconds: 60 * 60 * 24 * 7,
     authAttemptsPer15Min: int(env.AUTH_ATTEMPTS_PER_15_MIN, 10),
+    // Abuse limits (in-memory, per server).
+    apiPerMinute: int(env.API_PER_MINUTE, 240),
+    tradeCreatesPerHour: int(env.TRADE_CREATES_PER_HOUR, 20),
+    // Bot protection: Cloudflare Turnstile. Leave both empty to turn it off (sandbox only).
+    turnstileSiteKey: env.TURNSTILE_SITE_KEY || '',
+    turnstileSecret: env.TURNSTILE_SECRET_KEY || '',
+    // Identity checks and limits.
+    kycBeforeFirstTrade: env.KYC_BEFORE_FIRST_TRADE !== '0',
+    kycRequireDocument: env.KYC_REQUIRE_DOCUMENT !== '0',
+    dailyLimitKoboUnverified: int(env.DAILY_LIMIT_KOBO_UNVERIFIED, 100000000),
+    dailyLimitKoboVerified: int(env.DAILY_LIMIT_KOBO_VERIFIED, 1000000000),
+    reviewThresholdKobo: int(env.REVIEW_THRESHOLD_KOBO, 200000000),
+    // Basic anti-money-laundering rules.
+    amlMaxTrades10Min: int(env.AML_MAX_TRADES_10_MIN, 5),
+    // Security contact for responsible disclosure. Falls back to the support email.
+    securityEmail: env.SECURITY_EMAIL || env.SUPPORT_EMAIL || '',
     ...overrides,
   };
 
+  if (cfg.adminRequire2fa === undefined) cfg.adminRequire2fa = mode !== 'sandbox' && env.ADMIN_REQUIRE_2FA !== '0';
   if (mode === 'sandbox') {
     // Random secrets are fine in sandbox. Sessions and saved 2FA secrets stop working after a restart
     // unless you set TOKEN_SECRET and DATA_ENCRYPTION_KEY.
@@ -81,6 +98,7 @@ export function loadConfig(overrides = {}) {
     for (const [name, value] of [['COMPANY_NAME', cfg.companyName], ['SUPPORT_EMAIL', cfg.supportEmail], ['SUPPORT_HOURS', cfg.supportHours], ['PAYOUT_TIME', cfg.payoutTime]]) {
       if (!value) throw new Error(`${name} is required outside sandbox mode. Customers see it on the site.`);
     }
+    if (!cfg.turnstileSiteKey || !cfg.turnstileSecret) throw new Error('TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY are required outside sandbox mode, to block bots on login, sign-up and trades.');
     if (!cfg.adminEmails.length) throw new Error('ADMIN_EMAILS is required outside sandbox mode, so someone receives payout alerts.');
   }
   if (cfg.analyticsDomain && !/^[a-z0-9.-]+$/i.test(cfg.analyticsDomain)) throw new Error('ANALYTICS_DOMAIN must be a plain domain name such as kobodesk.com.');

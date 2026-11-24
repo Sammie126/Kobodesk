@@ -3,6 +3,8 @@ import { ASSETS } from './config.js';
 import { tx, logEvent } from './db.js';
 import { parseAmount, formatAmount, toKobo, formatNaira } from './money.js';
 import { getSellRates } from './rates.js';
+import { bankView } from './vault.js';
+import { limitsFor, usedToday, recentTradeCount, flagUser, holdReason } from './compliance.js';
 
 import { HttpError } from './errors.js';
 export { HttpError };
@@ -11,6 +13,8 @@ export { HttpError };
 //   awaiting_deposit -> confirming -> paying_out -> paid_out
 //   awaiting_deposit -> expired            (no deposit before the quote ran out)
 //   paying_out -> payout_failed            (retry from the admin route)
+//   confirming -> held_for_review          (large payout, flagged account: a person decides)
+//   held_for_review -> paying_out | review_rejected
 // A deposit that arrives after expiry is still paid, at the current rate instead of the locked one.
 
 export function tradeView(t) {
@@ -35,9 +39,18 @@ export function tradeView(t) {
 }
 
 export function expireStaleTrades(db) {
-  return db
-    .prepare("UPDATE trades SET status = 'expired', updated_at = ? WHERE status = 'awaiting_deposit' AND expires_at < ?")
-    .run(Date.now(), Date.now()).changes;
+  const now = Date.now();
+  let n = 0;
+  for (const { id } of db.prepare("SELECT id FROM trades WHERE status = 'awaiting_deposit' AND expires_at < ?").all(now)) {
+    const r = db.prepare("UPDATE trades SET status = 'expired', updated_at = ? WHERE id = ? AND status = 'awaiting_deposit'").run(now, id);
+    if (r.changes === 1) { n++; logEvent(db, id, 'status_changed', { from: 'awaiting_deposit', to: 'expired' }); }
+  }
+  return n;
+}
+
+// What an admin sees: the customer's trade plus the internal review reason, which customers never see.
+export function adminTradeView(t, email) {
+  return { ...tradeView(t), user_id: t.user_id, user_email: email, hold_reason: t.hold_reason, review_note: t.review_note };
 }
 
 // Validates coin, network and amount, then prices the trade. Used by both /api/quote and createTrade.
@@ -60,9 +73,22 @@ export async function priceTrade(config, input) {
   return { coin, network, scaled, rate, quote };
 }
 
-export async function createTrade({ db, config, providers, user, input }) {
+const ctxFor = (db, notifier) => ({ db, notifier });
+
+export async function createTrade({ db, config, providers, notifier, user, input }) {
   if (!user.email_verified) {
     throw new HttpError(403, 'Verify your email address before you trade. Check your inbox for the link.', 'verify_email');
+  }
+  if (user.flagged_at) {
+    throw new HttpError(403, 'We have paused new trades on your account while we complete a routine safety check. Contact support if you have questions.', 'account_review');
+  }
+  if (config.kycBeforeFirstTrade && !['pending', 'verified'].includes(user.kyc_status)) {
+    throw new HttpError(403, 'Verify your identity before your first trade. It takes a few minutes: go to Settings, then Identity check.', 'kyc_required');
+  }
+  // Many trades in a short time is a warning sign. Pause the account and let a person look.
+  if (recentTradeCount(db, user.id, 10) >= config.amlMaxTrades10Min) {
+    flagUser(ctxFor(db, notifier), user.id, `Started ${config.amlMaxTrades10Min} or more trades within 10 minutes.`);
+    throw new HttpError(403, 'We have paused new trades on your account while we complete a routine safety check. Contact support if you have questions.', 'account_review');
   }
   const { coin, network, scaled, rate, quote } = await priceTrade(config, input);
 
@@ -71,13 +97,23 @@ export async function createTrade({ db, config, providers, user, input }) {
     .get(String(input.bank_account_id ?? ''), user.id);
   if (!account) throw new HttpError(400, 'Choose one of your saved bank accounts.', 'bad_bank_account');
 
-  const cap = user.kyc_status === 'verified' ? config.maxTradeKoboVerified : config.maxTradeKoboUnverified;
+  const { perTrade: cap, daily } = limitsFor(config, user);
   if (quote > cap) {
     throw new HttpError(
       400,
       `This trade is above your limit of ₦${formatNaira(cap)}.` +
-        (user.kyc_status === 'verified' ? '' : ' Verify your identity to raise it.'),
+        (user.kyc_status === 'verified' ? '' : ' Get your identity verified to raise it.'),
       'above_limit'
+    );
+  }
+  const used = usedToday(db, user.id);
+  if (used + quote > daily) {
+    const left = Math.max(0, daily - used);
+    throw new HttpError(
+      400,
+      `This would take you over your daily limit of ₦${formatNaira(daily)}. You have ₦${formatNaira(left)} left in the last 24 hours.` +
+        (user.kyc_status === 'verified' ? '' : ' Get your identity verified to raise it.'),
+      'above_daily_limit'
     );
   }
 
@@ -90,7 +126,9 @@ export async function createTrade({ db, config, providers, user, input }) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'awaiting_deposit', ?, ?, ?)`
   ).run(id, user.id, account.id, coin, network, scaled, rate, config.flatFeeKobo, quote, address,
     now + config.quoteTtlSeconds * 1000, now, now);
-  logEvent(db, id, 'trade_created', { coin, network, amount: formatAmount(scaled) });
+  logEvent(db, id, 'trade_created', { user: user.id, coin, network, amount: formatAmount(scaled), quote_kobo: quote });
+  logEvent(db, id, 'deposit_address_generated', { address, provider: providers.crypto.name ?? 'unknown' });
+  logEvent(db, id, 'status_changed', { from: null, to: 'awaiting_deposit' });
   return db.prepare('SELECT * FROM trades WHERE id = ?').get(id);
 }
 
@@ -123,9 +161,11 @@ export async function applyDeposit({ db, config, providers, notifier }, event) {
     if (!seen) {
       db.prepare('INSERT INTO deposits (tx_hash, trade_id, amount_scaled, confirmations, first_seen_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
         .run(txHash, t.id, received, confirmations, now, now);
+      logEvent(db, t.id, 'deposit_seen', { tx_hash: txHash, amount: formatAmount(received), confirmations });
     } else if (seen.trade_id === t.id) {
       db.prepare('UPDATE deposits SET confirmations = MAX(confirmations, ?), updated_at = ? WHERE tx_hash = ?')
         .run(confirmations, now, txHash);
+      if (confirmations > seen.confirmations) logEvent(db, t.id, 'deposit_confirmations', { tx_hash: txHash, confirmations });
     }
     if (!['awaiting_deposit', 'expired', 'confirming'].includes(t.status)) return { done: t.status };
 
@@ -133,12 +173,17 @@ export async function applyDeposit({ db, config, providers, notifier }, event) {
     if (dep.confirmations < required(t)) {
       db.prepare("UPDATE trades SET status = 'confirming', received_scaled = ?, updated_at = ? WHERE id = ?")
         .run(dep.amount_scaled, now, t.id);
+      if (t.status !== 'confirming') logEvent(db, t.id, 'status_changed', { from: t.status, to: 'confirming' });
       return { waiting: true, first: t.status !== 'confirming' };
     }
     // Enough confirmations: claim the payout exactly once.
     const claim = db
       .prepare("UPDATE trades SET status = 'paying_out', received_scaled = ?, updated_at = ? WHERE id = ? AND status IN ('awaiting_deposit','expired','confirming')")
       .run(dep.amount_scaled, now, t.id);
+    if (claim.changes === 1) {
+      logEvent(db, t.id, 'deposit_confirmed', { tx_hash: txHash, confirmations: dep.confirmations, required: required(t) });
+      logEvent(db, t.id, 'status_changed', { from: t.status, to: 'paying_out' });
+    }
     return claim.changes === 1 ? { go: true, deposit: dep, trade: t } : { done: 'already_claimed' };
   });
 
@@ -159,16 +204,36 @@ export async function applyDeposit({ db, config, providers, notifier }, event) {
   if (payout <= 0) {
     db.prepare("UPDATE trades SET status = 'payout_failed', failure_reason = ?, updated_at = ? WHERE id = ?")
       .run('Deposit too small to pay out after fees.', Date.now(), t.id);
+    logEvent(db, t.id, 'status_changed', { from: 'paying_out', to: 'payout_failed', reason: 'too_small' });
     await notifier?.trade(t.id, 'payout_failed');
     return { result: 'payout_failed' };
   }
   db.prepare('UPDATE trades SET payout_kobo = ?, updated_at = ? WHERE id = ?').run(payout, Date.now(), t.id);
-  return runPayout({ db, providers, notifier }, t.id);
+
+  // Large payouts and flagged accounts wait for a person. The deposit is safe; nothing is sent yet.
+  const owner = db.prepare('SELECT * FROM users WHERE id = ?').get(t.user_id);
+  const reason = holdReason(db, config, owner, payout);
+  if (reason) {
+    db.prepare("UPDATE trades SET status = 'held_for_review', hold_reason = ?, updated_at = ? WHERE id = ?").run(reason, Date.now(), t.id);
+    logEvent(db, t.id, 'payout_held', { reason, payout_kobo: payout });
+    logEvent(db, t.id, 'status_changed', { from: 'paying_out', to: 'held_for_review' });
+    await notifier?.trade(t.id, 'held');
+    return { result: 'held_for_review' };
+  }
+  return runPayout({ db, config, providers, notifier }, t.id);
 }
 
-export async function runPayout({ db, providers, notifier }, tradeId) {
+export async function runPayout({ db, config, providers, notifier }, tradeId) {
   const t = db.prepare('SELECT * FROM trades WHERE id = ?').get(tradeId);
-  const account = db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(t.bank_account_id);
+  const account = bankView(db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(t.bank_account_id), config.dataKey);
+  if (account.account_number == null) {
+    // The encryption key changed or the data is damaged. Never guess: stop and let a person fix it.
+    db.prepare("UPDATE trades SET status = 'payout_failed', failure_reason = ?, updated_at = ? WHERE id = ?")
+      .run('Bank details could not be read. Check DATA_ENCRYPTION_KEY.', Date.now(), t.id);
+    logEvent(db, t.id, 'payout_failed', { error: 'bank_details_unreadable' });
+    await notifier?.trade(t.id, 'payout_failed');
+    return { result: 'payout_failed' };
+  }
   const reference = `kd_${t.id}`; // same reference on every retry, so the bank never pays twice
   let outcome;
   try {
@@ -185,21 +250,49 @@ export async function runPayout({ db, providers, notifier }, tradeId) {
   if (outcome.ok) {
     db.prepare("UPDATE trades SET status = 'paid_out', payout_ref = ?, failure_reason = NULL, updated_at = ? WHERE id = ?")
       .run(outcome.reference ?? reference, Date.now(), t.id);
+    logEvent(db, t.id, 'payout_sent', { payout_kobo: t.payout_kobo, reference: outcome.reference ?? reference });
     logEvent(db, t.id, 'paid_out', { payout_kobo: t.payout_kobo });
+    logEvent(db, t.id, 'status_changed', { from: 'paying_out', to: 'paid_out' });
     await notifier?.trade(t.id, 'paid_out');
     return { result: 'paid_out' };
   }
   db.prepare("UPDATE trades SET status = 'payout_failed', failure_reason = ?, updated_at = ? WHERE id = ?")
     .run(String(outcome.error ?? 'Payout failed'), Date.now(), t.id);
   logEvent(db, t.id, 'payout_failed', { error: outcome.error });
+  logEvent(db, t.id, 'status_changed', { from: 'paying_out', to: 'payout_failed' });
   await notifier?.trade(t.id, 'payout_failed');
   return { result: 'payout_failed' };
 }
 
-export function retryPayout(ctx, tradeId) {
+export function retryPayout(ctx, tradeId, admin) {
   const claim = ctx.db
     .prepare("UPDATE trades SET status = 'paying_out', updated_at = ? WHERE id = ? AND status = 'payout_failed' AND payout_kobo IS NOT NULL")
     .run(Date.now(), tradeId);
   if (claim.changes !== 1) throw new HttpError(409, 'Only trades with a failed payout can be retried.', 'not_retryable');
+  logEvent(ctx.db, tradeId, 'payout_retry', { admin: admin ?? null });
+  logEvent(ctx.db, tradeId, 'status_changed', { from: 'payout_failed', to: 'paying_out' });
   return runPayout(ctx, tradeId);
+}
+
+// A team member's decision on a held trade. Rejecting never moves crypto back by itself: refund it by hand.
+export async function reviewTrade(ctx, tradeId, decision, note, admin) {
+  const { db, notifier } = ctx;
+  note = String(note ?? '').trim().slice(0, 300);
+  if (!['release', 'reject'].includes(decision)) throw new HttpError(400, 'Choose release or reject.', 'bad_decision');
+  if (decision === 'reject' && !note) throw new HttpError(400, 'Write a reason for rejecting.', 'note_required');
+  if (decision === 'release') {
+    const claim = db.prepare("UPDATE trades SET status = 'paying_out', review_note = ?, updated_at = ? WHERE id = ? AND status = 'held_for_review'")
+      .run(note || null, Date.now(), tradeId);
+    if (claim.changes !== 1) throw new HttpError(409, 'This trade is not waiting for review.', 'not_held');
+    logEvent(db, tradeId, 'review_released', { admin, note });
+    logEvent(db, tradeId, 'status_changed', { from: 'held_for_review', to: 'paying_out' });
+    return runPayout(ctx, tradeId);
+  }
+  const r = db.prepare("UPDATE trades SET status = 'review_rejected', review_note = ?, failure_reason = ?, updated_at = ? WHERE id = ? AND status = 'held_for_review'")
+    .run(note, note, Date.now(), tradeId);
+  if (r.changes !== 1) throw new HttpError(409, 'This trade is not waiting for review.', 'not_held');
+  logEvent(db, tradeId, 'review_rejected', { admin, note });
+  logEvent(db, tradeId, 'status_changed', { from: 'held_for_review', to: 'review_rejected' });
+  await notifier?.trade(tradeId, 'review_rejected');
+  return { result: 'review_rejected' };
 }

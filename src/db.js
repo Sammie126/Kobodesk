@@ -83,6 +83,31 @@ CREATE TABLE IF NOT EXISTS events (
   detail TEXT,
   created_at INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS events_trade_idx ON events(trade_id, id);
+
+-- The audit log can be added to but never changed or erased through the app.
+CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events
+BEGIN SELECT RAISE(ABORT, 'The audit log is append-only.'); END;
+CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events
+BEGIN SELECT RAISE(ABORT, 'The audit log is append-only.'); END;
+
+-- ID photos and PDFs, stored encrypted (see vault.js).
+CREATE TABLE IF NOT EXISTS kyc_documents (
+  user_id TEXT PRIMARY KEY REFERENCES users(id),
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  data_enc BLOB NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS deletion_requests (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'open',
+  requested_at INTEGER NOT NULL,
+  closed_at INTEGER,
+  note TEXT
+);
 `;
 
 // Columns added after the first version. Older databases get them on start-up.
@@ -97,17 +122,32 @@ const USER_COLUMNS = [
   ['verify_code_attempts', 'INTEGER NOT NULL DEFAULT 0'],
   ['referral_code', 'TEXT'],
   ['referred_by', 'TEXT'],
+  ['flagged_at', 'INTEGER'],
+  ['flag_reason', 'TEXT'],
 ];
+const TRADE_COLUMNS = [
+  ['hold_reason', 'TEXT'],
+  ['review_note', 'TEXT'],
+];
+const BANK_COLUMNS = [
+  ['account_hash', 'TEXT'],
+  ['account_last4', 'TEXT'],
+];
+function addColumns(db, table, list) {
+  const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+  for (const [name, def] of list) if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);
+}
 
 export function openDb(dbPath) {
   if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
-  const have = new Set(db.prepare('PRAGMA table_info(users)').all().map((c) => c.name));
-  for (const [name, def] of USER_COLUMNS) {
-    if (!have.has(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${def}`);
-  }
+  addColumns(db, 'users', USER_COLUMNS);
+  addColumns(db, 'trades', TRADE_COLUMNS);
+  addColumns(db, 'bank_accounts', BANK_COLUMNS);
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS bank_user_hash_idx ON bank_accounts(user_id, account_hash)');
+  db.exec('CREATE INDEX IF NOT EXISTS bank_hash_idx ON bank_accounts(account_hash)');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_referral_idx ON users(referral_code)');
   db.exec('CREATE INDEX IF NOT EXISTS users_referred_by_idx ON users(referred_by)');
   return db;
