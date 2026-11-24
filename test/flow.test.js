@@ -8,7 +8,7 @@ import { parseAmount, formatAmount, toKobo, formatNaira } from '../src/money.js'
 let app, base, config;
 
 before(async () => {
-  config = loadConfig({ mode: 'sandbox', dbPath: ':memory:', adminEmails: ['admin@example.com'], authAttemptsPer15Min: 1000, quiet: true });
+  config = loadConfig({ mode: 'sandbox', dbPath: ':memory:', adminEmails: ['admin@example.com'], authAttemptsPer15Min: 1000, quiet: true, kycBeforeFirstTrade: false, amlMaxTrades10Min: 100000, tradeCreatesPerHour: 100000, dailyLimitKoboUnverified: 10**13, dailyLimitKoboVerified: 10**13, reviewThresholdKobo: 10**13, kycRequireDocument: false, apiPerMinute: 100000 });
   app = createApp(config);
   await new Promise((r) => app.server.listen(0, r));
   base = `http://localhost:${app.server.address().port}`;
@@ -33,7 +33,9 @@ async function newUser(email, password = 'a-long-password') {
   return r.json.token;
 }
 
-async function addBank(token, number = '0123456789') {
+let acct = 1000000000;
+const nextAcct = () => String(++acct); // every customer gets their own bank account number
+async function addBank(token, number = nextAcct()) {
   const r = await api('/api/bank-accounts', { method: 'POST', token, body: { bank_code: '058', account_number: number } });
   assert.equal(r.status, 201, JSON.stringify(r.json));
   return r.json.id;
@@ -68,7 +70,7 @@ test('bank account validation', async () => {
   assert.equal(bad.status, 400);
   const missing = await api('/api/bank-accounts', { method: 'POST', token, body: { bank_code: '058', account_number: '1234560000' } });
   assert.equal(missing.status, 422);
-  await addBank(token);
+  await addBank(token, '0123456789');
   const dup = await api('/api/bank-accounts', { method: 'POST', token, body: { bank_code: '058', account_number: '0123456789' } });
   assert.equal(dup.status, 409);
 });
@@ -167,7 +169,7 @@ test('rates and assets are public; bad JSON is a clean 400', async () => {
 test('live mode refuses to start on fake providers', () => {
   const live = loadConfig({
     mode: 'live', ratesSource: 'live', companyName: 'Kobodesk Ltd', supportEmail: 'help@kobodesk.example', supportHours: '8am to 8pm', payoutTime: '5 minutes', adminEmails: ['ops@kobodesk.example'], tokenSecret: 'x'.repeat(32), webhookSecret: 'y'.repeat(32), dataKey: 'z'.repeat(32),
-    publicUrl: 'https://kobodesk.example', mailProvider: 'resend', mailApiKey: 'k', mailFrom: 'no-reply@kobodesk.example',
+    publicUrl: 'https://kobodesk.example', turnstileSiteKey: 's', turnstileSecret: 't', mailProvider: 'resend', mailApiKey: 'k', mailFrom: 'no-reply@kobodesk.example',
   });
   assert.throws(() => createApp(live, { db: app.db }), /No live providers/);
 });

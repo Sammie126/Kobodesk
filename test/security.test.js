@@ -9,7 +9,7 @@ import { encryptSecret, decryptSecret } from '../src/auth.js';
 let app, base, port;
 
 before(async () => {
-  const config = loadConfig({ mode: 'sandbox', dbPath: ':memory:', authAttemptsPer15Min: 1000, quiet: true });
+  const config = loadConfig({ mode: 'sandbox', dbPath: ':memory:', authAttemptsPer15Min: 1000, quiet: true, kycBeforeFirstTrade: false, amlMaxTrades10Min: 100000, tradeCreatesPerHour: 100000, dailyLimitKoboUnverified: 10**13, dailyLimitKoboVerified: 10**13, reviewThresholdKobo: 10**13, kycRequireDocument: false, apiPerMinute: 100000 });
   app = createApp(config);
   await new Promise((r) => app.server.listen(0, r));
   port = app.server.address().port;
@@ -177,7 +177,7 @@ test('public quote endpoint prices a trade and rejects bad input', async () => {
 
 test('live mode refuses weak configuration', () => {
   const good = { mode: 'live', ratesSource: 'live', companyName: 'Kobodesk Ltd', supportEmail: 'help@kobodesk.example', supportHours: '8am to 8pm', payoutTime: '5 minutes', adminEmails: ['ops@kobodesk.example'], tokenSecret: 'a'.repeat(32), webhookSecret: 'b'.repeat(32), dataKey: 'c'.repeat(32),
-    publicUrl: 'https://kobodesk.example', mailProvider: 'resend', mailApiKey: 'k', mailFrom: 'Kobodesk <no-reply@kobodesk.example>' };
+    publicUrl: 'https://kobodesk.example', turnstileSiteKey: 's', turnstileSecret: 't', mailProvider: 'resend', mailApiKey: 'k', mailFrom: 'Kobodesk <no-reply@kobodesk.example>' };
   assert.doesNotThrow(() => loadConfig(good));
   assert.throws(() => loadConfig({ ...good, publicUrl: 'http://kobodesk.example' }), /https/);
   assert.throws(() => loadConfig({ ...good, dataKey: 'a'.repeat(32) }), /different/);

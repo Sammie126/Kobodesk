@@ -10,7 +10,7 @@ let app, base, config;
 
 before(async () => {
   config = loadConfig({
-    mode: 'sandbox', dbPath: ':memory:', adminEmails: ['admin@example.com'], authAttemptsPer15Min: 100000, quiet: true,
+    mode: 'sandbox', dbPath: ':memory:', adminEmails: ['admin@example.com'], authAttemptsPer15Min: 100000, quiet: true, kycBeforeFirstTrade: false, amlMaxTrades10Min: 100000, tradeCreatesPerHour: 100000, dailyLimitKoboUnverified: 10**13, dailyLimitKoboVerified: 10**13, reviewThresholdKobo: 10**13, kycRequireDocument: false, apiPerMinute: 100000,
     publicUrl: 'https://kobodesk.example', companyName: 'Kobodesk Ltd', supportEmail: 'help@kobodesk.example',
     rcNumber: 'RC1234567', supportHours: '8am to 8pm', payoutTime: '5 minutes',
   });
@@ -35,7 +35,8 @@ async function newUser(email, extra = {}) {
   app.db.prepare('UPDATE users SET email_verified = 1 WHERE email = ?').run(email);
   return r.json.token;
 }
-async function bank(token, number = '0123456789') {
+let acct = 2000000000;
+async function bank(token, number = String(++acct)) {
   return (await api('/api/bank-accounts', { method: 'POST', token, body: { bank_code: '058', account_number: number } })).json.id;
 }
 async function paidTrade(token, bankId, amount = '100') {
@@ -169,7 +170,7 @@ test('emails: a failed payout warns the customer and the admins, and stuck alert
 test('receipts: paid trades only, owner only, with the real rate', async () => {
   const token = await newUser('rcpt@example.com');
   const other = await newUser('rcpt2@example.com');
-  const b = await bank(token);
+  const b = await bank(token, '3333336789');
   const open = (await api('/api/trades', { method: 'POST', token, body: { coin: 'USDT', network: 'TRC20', amount: '10', bank_account_id: b } })).json;
   assert.equal((await api(`/api/trades/${open.id}/receipt`, { token })).status, 409);
   const paid = await paidTrade(token, b);
